@@ -34,7 +34,7 @@ What the backend does **not** do in the MVP: send push notifications, real-time 
 | Database | **PostgreSQL 17** | Strong transactions for the token ledger, `timestamptz`, JSONB for AI output |
 | ORM / migrations | **Drizzle ORM + drizzle-kit** | SQL-like, typed, migrations are plain SQL files you can read |
 | Background jobs and cron | **pg-boss** (job queue stored in Postgres) | Runs AI breakdowns in the background and nightly maintenance with no Redis to operate |
-| Auth | **Sign in with Apple** → server verifies Apple's ID token (`jose`) → issues own **JWT access token (15 min) + rotating refresh token** | Works in China; web can use Apple's JS sign-in later; phone/SMS can be added for China launch |
+| Auth | **Sign in with Apple** (server verifies Apple's ID token with `jose`) or **email + password** (scrypt hash; email format checked, not verified, in the MVP) → issues own **JWT access token (15 min) + rotating refresh token** | Works in China; email also covers users without an Apple ID and the web app; phone/SMS can be added for China launch |
 | AI | **Qwen via Alibaba Cloud Model Studio** (OpenAI-compatible endpoint, called with the `openai` SDK + custom `baseURL`) behind an `AiProvider` interface | Claude and OpenAI don't serve mainland China or Hong Kong. Behind the interface, a global deployment can switch to Claude without code changes elsewhere. |
 | Logging | **pino** (JSON logs) → `docker logs` for MVP | Cheap; can ship to Alibaba Cloud's log service (SLS) later |
 | Testing | **Vitest** + **Testcontainers** (real Postgres) | Rules engine tested against shared test cases; ledger tested against a real database |
@@ -191,7 +191,8 @@ A **cue** is a reminder, a separate kind of item: a title and a time, **no durat
 ## 4. Data model (MVP)
 
 ```
-users            id, apple_sub, display_name, timezone, created_at, deleted_at
+users            id, apple_sub?, email? (lower-cased, UNIQUE), password_hash?, display_name,
+                 timezone, created_at, deleted_at
 refresh_tokens   id, user_id, token_hash, device_label, expires_at, revoked_at
 user_settings    user_id, planning_prompts (JSONB: [{weekday[], local_time}]), day_end_local_time (default 00:00)
 
@@ -234,6 +235,8 @@ The ledger is **append-only**: no updates or deletes; corrections are new entrie
 | Group | Method & path | Purpose |
 |---|---|---|
 | **Auth** | `POST /v1/auth/apple` | Exchange Apple ID token → access + refresh tokens (creates the user on first sign-in) |
+| | `POST /v1/auth/email/signup` | Email + password → access + refresh tokens. `409 email_taken` if the address is in use |
+| | `POST /v1/auth/email/signin` | Email + password → access + refresh tokens. `401 invalid_credentials` for a wrong password or unknown email alike |
 | | `POST /v1/auth/refresh` | Rotate refresh token |
 | | `POST /v1/auth/logout` | Revoke current refresh token |
 | **Account** | `GET /v1/me` | Profile, time zone, token balance |
@@ -303,7 +306,7 @@ backend/
 │   ├── services/       # events, recording, ledger, goals
 │   ├── ai/             # AiProvider interface + qwen.ts (+ claude.ts later)
 │   ├── jobs/           # pg-boss workers
-│   ├── auth/           # Apple token verification, JWT, refresh rotation
+│   ├── auth/           # Apple token verification, email/password, JWT, refresh rotation
 │   └── db/             # Drizzle schema + migrations
 ├── test/
 ├── Dockerfile
@@ -379,6 +382,7 @@ These cost little now and are expensive to add later:
 | Q15 | Repeating cues support **this / this and following / all** edits | §3.8 |
 | Q16 | Two kinds of events: **Cadenza** (timed, rewarded) and **Tutti** (ordinary). Both use the grid; only Cadenzas earn tokens; planned events can switch kind | §3, §3.6 |
 | Q17 | Names: a 20-minute unit is a **bar**; a reminder is a **cue** | §3.1, §3.8 |
+| Q18 | **Email + password** sign-up/sign-in alongside Sign in with Apple. MVP checks the email's format only (no verification email, no password reset yet); passwords 8–128 chars. Email and Apple accounts stay **separate**, even when the addresses match | §2, §4, §5.1 |
 
 ### 8.2 Still open
 

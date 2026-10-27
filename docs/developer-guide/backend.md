@@ -217,7 +217,7 @@ jobs:
 
 ## 10. Decisions the spec left open
 
-The backend made ten calls the spec didn't cover: late offline taps, the close_stale backstop, account deletion, unsupported time zones, the day-end anchor, cue details, size caps, abandoned events, the AI limit's day, and refresh-token reuse. They are listed in the [backend README](../../../Twenty-backend/README.md#decisions-the-spec-left-open). If you change one, update that list.
+The backend made eleven calls the spec didn't cover: late offline taps, the close_stale backstop, account deletion, unsupported time zones, the day-end anchor, cue details, size caps, abandoned events, the AI limit's day, refresh-token reuse, and the default event kind. They are listed in the [backend README](../../../Twenty-backend/README.md#decisions-the-spec-left-open). If you change one, update that list.
 
 ## 11. Troubleshooting
 
