@@ -1,0 +1,1596 @@
+{
+  "fixtures_version": 1,
+  "rules_doc": "docs/architecture/backend-tech-stack.md §3",
+  "constants": {
+    "slot_minutes": 20,
+    "snap_before_minutes": 15,
+    "snap_after_minutes": 5,
+    "max_early_slots": 2,
+    "max_overlapping_events": 2,
+    "reward": {
+      "tokens_per_slot": 10,
+      "early_slot_rate": 0.5,
+      "extended_slot_rate": 0.5,
+      "auto_finish_deduction_slots": 1
+    }
+  },
+  "conventions": [
+    "Times are ISO 8601 with offset; compare instants, not strings. Grid math runs in UTC (whole-hour zones only).",
+    "snap(t) = the grid mark g with g - 15 min < t <= g + 5 min.",
+    "Event intervals are half-open [start, end): an event ending at 15:00 does not overlap one starting at 15:00.",
+    "tapped_at = null in finish cases means the auto-finish job fired at planned_end + 5 min.",
+    "Conflict and warning ID lists are sorted. Expected objects must match exactly (no extra keys).",
+    "Events with status cancelled or missed are ignored by overlap checks and cascades."
+  ],
+  "groups": {
+    "snap": [
+      {
+        "id": "snap-01",
+        "desc": "Exactly on a mark",
+        "input": {
+          "tapped_at": "2026-11-02T14:00:00+08:00"
+        },
+        "expected": {
+          "snapped": "2026-11-02T14:00:00+08:00"
+        }
+      },
+      {
+        "id": "snap-02",
+        "desc": "Last second of the 5-min grace keeps the mark",
+        "input": {
+          "tapped_at": "2026-11-02T14:05:00+08:00"
+        },
+        "expected": {
+          "snapped": "2026-11-02T14:00:00+08:00"
+        }
+      },
+      {
+        "id": "snap-03",
+        "desc": "One second past grace goes to the next mark",
+        "input": {
+          "tapped_at": "2026-11-02T14:05:01+08:00"
+        },
+        "expected": {
+          "snapped": "2026-11-02T14:20:00+08:00"
+        }
+      },
+      {
+        "id": "snap-04",
+        "desc": "15 min before a mark belongs to the previous mark",
+        "input": {
+          "tapped_at": "2026-11-02T13:45:00+08:00"
+        },
+        "expected": {
+          "snapped": "2026-11-02T13:40:00+08:00"
+        }
+      },
+      {
+        "id": "snap-05",
+        "desc": "Just under 15 min before a mark belongs to that mark",
+        "input": {
+          "tapped_at": "2026-11-02T13:45:01+08:00"
+        },
+        "expected": {
+          "snapped": "2026-11-02T14:00:00+08:00"
+        }
+      },
+      {
+        "id": "snap-06",
+        "desc": "Crossing midnight",
+        "input": {
+          "tapped_at": "2026-11-02T23:55:01+08:00"
+        },
+        "expected": {
+          "snapped": "2026-11-03T00:00:00+08:00"
+        }
+      },
+      {
+        "id": "snap-07",
+        "desc": "Grace after midnight",
+        "input": {
+          "tapped_at": "2026-11-03T00:05:00+08:00"
+        },
+        "expected": {
+          "snapped": "2026-11-03T00:00:00+08:00"
+        }
+      },
+      {
+        "id": "snap-08",
+        "desc": "Other whole-hour zone (New York, UTC-5)",
+        "input": {
+          "tapped_at": "2026-11-02T09:25:01-05:00"
+        },
+        "expected": {
+          "snapped": "2026-11-02T09:40:00-05:00"
+        }
+      }
+    ],
+    "start": [
+      {
+        "id": "start-01",
+        "desc": "More than 2 slots early is rejected",
+        "input": {
+          "planned_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T13:05:00+08:00"
+        },
+        "expected": {
+          "outcome": "rejected",
+          "error": "too_early"
+        }
+      },
+      {
+        "id": "start-02",
+        "desc": "Earliest allowed tap: 2 slots early",
+        "input": {
+          "planned_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T13:05:01+08:00"
+        },
+        "expected": {
+          "outcome": "early",
+          "recorded_start": "2026-11-02T13:20:00+08:00",
+          "early_slots": 2,
+          "late_slots": 0
+        }
+      },
+      {
+        "id": "start-03",
+        "desc": "Still 2 slots early at end of window",
+        "input": {
+          "planned_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T13:25:00+08:00"
+        },
+        "expected": {
+          "outcome": "early",
+          "recorded_start": "2026-11-02T13:20:00+08:00",
+          "early_slots": 2,
+          "late_slots": 0
+        }
+      },
+      {
+        "id": "start-04",
+        "desc": "1 slot early",
+        "input": {
+          "planned_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T13:25:01+08:00"
+        },
+        "expected": {
+          "outcome": "early",
+          "recorded_start": "2026-11-02T13:40:00+08:00",
+          "early_slots": 1,
+          "late_slots": 0
+        }
+      },
+      {
+        "id": "start-05",
+        "desc": "1 slot early, last second",
+        "input": {
+          "planned_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T13:45:00+08:00"
+        },
+        "expected": {
+          "outcome": "early",
+          "recorded_start": "2026-11-02T13:40:00+08:00",
+          "early_slots": 1,
+          "late_slots": 0
+        }
+      },
+      {
+        "id": "start-06",
+        "desc": "On time, earliest second",
+        "input": {
+          "planned_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T13:45:01+08:00"
+        },
+        "expected": {
+          "outcome": "on_time",
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "early_slots": 0,
+          "late_slots": 0
+        }
+      },
+      {
+        "id": "start-07",
+        "desc": "On time, exactly at planned start",
+        "input": {
+          "planned_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T14:00:00+08:00"
+        },
+        "expected": {
+          "outcome": "on_time",
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "early_slots": 0,
+          "late_slots": 0
+        }
+      },
+      {
+        "id": "start-08",
+        "desc": "On time, last second of grace",
+        "input": {
+          "planned_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T14:05:00+08:00"
+        },
+        "expected": {
+          "outcome": "on_time",
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "early_slots": 0,
+          "late_slots": 0
+        }
+      },
+      {
+        "id": "start-09",
+        "desc": "Late by 1 slot",
+        "input": {
+          "planned_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T14:05:01+08:00"
+        },
+        "expected": {
+          "outcome": "late",
+          "recorded_start": "2026-11-02T14:20:00+08:00",
+          "early_slots": 0,
+          "late_slots": 1
+        }
+      },
+      {
+        "id": "start-10",
+        "desc": "Late by 1 slot, last second",
+        "input": {
+          "planned_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T14:25:00+08:00"
+        },
+        "expected": {
+          "outcome": "late",
+          "recorded_start": "2026-11-02T14:20:00+08:00",
+          "early_slots": 0,
+          "late_slots": 1
+        }
+      },
+      {
+        "id": "start-11",
+        "desc": "Late by 2 slots",
+        "input": {
+          "planned_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T14:25:01+08:00"
+        },
+        "expected": {
+          "outcome": "late",
+          "recorded_start": "2026-11-02T14:40:00+08:00",
+          "early_slots": 0,
+          "late_slots": 2
+        }
+      },
+      {
+        "id": "start-12",
+        "desc": "Late by 2 slots, last second",
+        "input": {
+          "planned_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T14:45:00+08:00"
+        },
+        "expected": {
+          "outcome": "late",
+          "recorded_start": "2026-11-02T14:40:00+08:00",
+          "early_slots": 0,
+          "late_slots": 2
+        }
+      },
+      {
+        "id": "start-13",
+        "desc": "Snaps to the planned end: missed",
+        "input": {
+          "planned_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T14:45:01+08:00"
+        },
+        "expected": {
+          "outcome": "missed"
+        }
+      },
+      {
+        "id": "start-14",
+        "desc": "1-slot event started late is missed",
+        "input": {
+          "planned_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T14:20:00+08:00",
+          "tapped_at": "2026-11-02T14:05:01+08:00"
+        },
+        "expected": {
+          "outcome": "missed"
+        }
+      },
+      {
+        "id": "start-15",
+        "desc": "Early start that would make 3 events overlap is rejected",
+        "input": {
+          "planned_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T13:30:00+08:00",
+          "event_id": "X",
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T13:00:00+08:00",
+              "end": "2026-11-02T14:00:00+08:00"
+            },
+            {
+              "id": "B",
+              "start": "2026-11-02T13:20:00+08:00",
+              "end": "2026-11-02T14:00:00+08:00"
+            },
+            {
+              "id": "X",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00"
+            }
+          ]
+        },
+        "expected": {
+          "outcome": "rejected",
+          "error": "overlap_limit",
+          "conflicts": [
+            "A",
+            "B"
+          ]
+        }
+      },
+      {
+        "id": "start-16",
+        "desc": "Early start touching (not overlapping) two events is allowed",
+        "input": {
+          "planned_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T13:30:00+08:00",
+          "event_id": "X",
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T13:00:00+08:00",
+              "end": "2026-11-02T13:40:00+08:00"
+            },
+            {
+              "id": "B",
+              "start": "2026-11-02T13:20:00+08:00",
+              "end": "2026-11-02T13:40:00+08:00"
+            },
+            {
+              "id": "X",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00"
+            }
+          ]
+        },
+        "expected": {
+          "outcome": "early",
+          "recorded_start": "2026-11-02T13:40:00+08:00",
+          "early_slots": 1,
+          "late_slots": 0
+        }
+      }
+    ],
+    "finish": [
+      {
+        "id": "finish-01",
+        "desc": "Earliest on-time finish (15 min before end)",
+        "input": {
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T14:45:01+08:00"
+        },
+        "expected": {
+          "finish_kind": "on_time",
+          "recorded_end": "2026-11-02T15:00:00+08:00"
+        }
+      },
+      {
+        "id": "finish-02",
+        "desc": "Finish exactly at planned end",
+        "input": {
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T15:00:00+08:00"
+        },
+        "expected": {
+          "finish_kind": "on_time",
+          "recorded_end": "2026-11-02T15:00:00+08:00"
+        }
+      },
+      {
+        "id": "finish-03",
+        "desc": "Last second of the +5 min window",
+        "input": {
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T15:05:00+08:00"
+        },
+        "expected": {
+          "finish_kind": "on_time",
+          "recorded_end": "2026-11-02T15:00:00+08:00"
+        }
+      },
+      {
+        "id": "finish-04",
+        "desc": "Tap after +5 min counts as auto-finish (e.g. queued offline tap)",
+        "input": {
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T15:05:01+08:00"
+        },
+        "expected": {
+          "finish_kind": "auto",
+          "recorded_end": "2026-11-02T15:00:00+08:00"
+        }
+      },
+      {
+        "id": "finish-05",
+        "desc": "No tap: auto-finish job fired at E + 5",
+        "input": {
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": null
+        },
+        "expected": {
+          "finish_kind": "auto",
+          "recorded_end": "2026-11-02T15:00:00+08:00"
+        }
+      },
+      {
+        "id": "finish-06",
+        "desc": "Shortened by 1 slot (last second of that window)",
+        "input": {
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T14:45:00+08:00"
+        },
+        "expected": {
+          "finish_kind": "shortened",
+          "recorded_end": "2026-11-02T14:40:00+08:00"
+        }
+      },
+      {
+        "id": "finish-07",
+        "desc": "Shortened by 1 slot (first second of that window)",
+        "input": {
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T14:25:01+08:00"
+        },
+        "expected": {
+          "finish_kind": "shortened",
+          "recorded_end": "2026-11-02T14:40:00+08:00"
+        }
+      },
+      {
+        "id": "finish-08",
+        "desc": "Shortened by 2 slots",
+        "input": {
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T14:25:00+08:00"
+        },
+        "expected": {
+          "finish_kind": "shortened",
+          "recorded_end": "2026-11-02T14:20:00+08:00"
+        }
+      },
+      {
+        "id": "finish-09",
+        "desc": "Shortened to a single slot",
+        "input": {
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T14:05:01+08:00"
+        },
+        "expected": {
+          "finish_kind": "shortened",
+          "recorded_end": "2026-11-02T14:20:00+08:00"
+        }
+      },
+      {
+        "id": "finish-10",
+        "desc": "Snaps back to the recorded start: abandoned",
+        "input": {
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T14:05:00+08:00"
+        },
+        "expected": {
+          "finish_kind": "abandoned"
+        }
+      },
+      {
+        "id": "finish-11",
+        "desc": "Late start, finish snaps to recorded start: abandoned",
+        "input": {
+          "recorded_start": "2026-11-02T14:20:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T14:25:00+08:00"
+        },
+        "expected": {
+          "finish_kind": "abandoned"
+        }
+      },
+      {
+        "id": "finish-12",
+        "desc": "Extended event: windows follow the new end",
+        "input": {
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:20:00+08:00",
+          "tapped_at": "2026-11-02T15:25:00+08:00"
+        },
+        "expected": {
+          "finish_kind": "on_time",
+          "recorded_end": "2026-11-02T15:20:00+08:00"
+        }
+      },
+      {
+        "id": "finish-13",
+        "desc": "Extended event finished inside the extension",
+        "input": {
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:40:00+08:00",
+          "tapped_at": "2026-11-02T15:05:00+08:00"
+        },
+        "expected": {
+          "finish_kind": "shortened",
+          "recorded_end": "2026-11-02T15:00:00+08:00"
+        }
+      }
+    ],
+    "tokens": [
+      {
+        "id": "tokens-01",
+        "desc": "On time start and finish: full reward",
+        "input": {
+          "original_start": "2026-11-02T14:00:00+08:00",
+          "original_end": "2026-11-02T15:00:00+08:00",
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "recorded_end": "2026-11-02T15:00:00+08:00",
+          "finish_kind": "on_time"
+        },
+        "expected": {
+          "planned_slots_completed": 3,
+          "early_slots_completed": 0,
+          "extended_slots_completed": 0,
+          "auto_deduction_slots": 0,
+          "tokens": 30
+        }
+      },
+      {
+        "id": "tokens-02",
+        "desc": "Late by 1 slot: loses that slot only",
+        "input": {
+          "original_start": "2026-11-02T14:00:00+08:00",
+          "original_end": "2026-11-02T15:00:00+08:00",
+          "recorded_start": "2026-11-02T14:20:00+08:00",
+          "recorded_end": "2026-11-02T15:00:00+08:00",
+          "finish_kind": "on_time"
+        },
+        "expected": {
+          "planned_slots_completed": 2,
+          "early_slots_completed": 0,
+          "extended_slots_completed": 0,
+          "auto_deduction_slots": 0,
+          "tokens": 20
+        }
+      },
+      {
+        "id": "tokens-03",
+        "desc": "Early by 1 slot: +50% of a slot",
+        "input": {
+          "original_start": "2026-11-02T14:00:00+08:00",
+          "original_end": "2026-11-02T15:00:00+08:00",
+          "recorded_start": "2026-11-02T13:40:00+08:00",
+          "recorded_end": "2026-11-02T15:00:00+08:00",
+          "finish_kind": "on_time"
+        },
+        "expected": {
+          "planned_slots_completed": 3,
+          "early_slots_completed": 1,
+          "extended_slots_completed": 0,
+          "auto_deduction_slots": 0,
+          "tokens": 35
+        }
+      },
+      {
+        "id": "tokens-04",
+        "desc": "Early by 2 slots",
+        "input": {
+          "original_start": "2026-11-02T14:00:00+08:00",
+          "original_end": "2026-11-02T15:00:00+08:00",
+          "recorded_start": "2026-11-02T13:20:00+08:00",
+          "recorded_end": "2026-11-02T15:00:00+08:00",
+          "finish_kind": "on_time"
+        },
+        "expected": {
+          "planned_slots_completed": 3,
+          "early_slots_completed": 2,
+          "extended_slots_completed": 0,
+          "auto_deduction_slots": 0,
+          "tokens": 40
+        }
+      },
+      {
+        "id": "tokens-05",
+        "desc": "Shortened by 1 slot: proportional",
+        "input": {
+          "original_start": "2026-11-02T14:00:00+08:00",
+          "original_end": "2026-11-02T15:00:00+08:00",
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "recorded_end": "2026-11-02T14:40:00+08:00",
+          "finish_kind": "shortened"
+        },
+        "expected": {
+          "planned_slots_completed": 2,
+          "early_slots_completed": 0,
+          "extended_slots_completed": 0,
+          "auto_deduction_slots": 0,
+          "tokens": 20
+        }
+      },
+      {
+        "id": "tokens-06",
+        "desc": "Extended by 1 slot and completed: +50%",
+        "input": {
+          "original_start": "2026-11-02T14:00:00+08:00",
+          "original_end": "2026-11-02T15:00:00+08:00",
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "recorded_end": "2026-11-02T15:20:00+08:00",
+          "finish_kind": "on_time"
+        },
+        "expected": {
+          "planned_slots_completed": 3,
+          "early_slots_completed": 0,
+          "extended_slots_completed": 1,
+          "auto_deduction_slots": 0,
+          "tokens": 35
+        }
+      },
+      {
+        "id": "tokens-07",
+        "desc": "Extended by 2, finished after 1: unused extension costs nothing",
+        "input": {
+          "original_start": "2026-11-02T14:00:00+08:00",
+          "original_end": "2026-11-02T15:00:00+08:00",
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "recorded_end": "2026-11-02T15:20:00+08:00",
+          "finish_kind": "shortened"
+        },
+        "expected": {
+          "planned_slots_completed": 3,
+          "early_slots_completed": 0,
+          "extended_slots_completed": 1,
+          "auto_deduction_slots": 0,
+          "tokens": 35
+        }
+      },
+      {
+        "id": "tokens-08",
+        "desc": "Auto-finish: one slot deducted",
+        "input": {
+          "original_start": "2026-11-02T14:00:00+08:00",
+          "original_end": "2026-11-02T15:00:00+08:00",
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "recorded_end": "2026-11-02T15:00:00+08:00",
+          "finish_kind": "auto"
+        },
+        "expected": {
+          "planned_slots_completed": 3,
+          "early_slots_completed": 0,
+          "extended_slots_completed": 0,
+          "auto_deduction_slots": 1,
+          "tokens": 20
+        }
+      },
+      {
+        "id": "tokens-09",
+        "desc": "Extended by 1 then auto-finished",
+        "input": {
+          "original_start": "2026-11-02T14:00:00+08:00",
+          "original_end": "2026-11-02T15:00:00+08:00",
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "recorded_end": "2026-11-02T15:20:00+08:00",
+          "finish_kind": "auto"
+        },
+        "expected": {
+          "planned_slots_completed": 3,
+          "early_slots_completed": 0,
+          "extended_slots_completed": 1,
+          "auto_deduction_slots": 1,
+          "tokens": 25
+        }
+      },
+      {
+        "id": "tokens-10",
+        "desc": "Late by 1 and auto-finished",
+        "input": {
+          "original_start": "2026-11-02T14:00:00+08:00",
+          "original_end": "2026-11-02T15:00:00+08:00",
+          "recorded_start": "2026-11-02T14:20:00+08:00",
+          "recorded_end": "2026-11-02T15:00:00+08:00",
+          "finish_kind": "auto"
+        },
+        "expected": {
+          "planned_slots_completed": 2,
+          "early_slots_completed": 0,
+          "extended_slots_completed": 0,
+          "auto_deduction_slots": 1,
+          "tokens": 10
+        }
+      },
+      {
+        "id": "tokens-11",
+        "desc": "Late by 2 and auto-finished: reaches zero",
+        "input": {
+          "original_start": "2026-11-02T14:00:00+08:00",
+          "original_end": "2026-11-02T15:00:00+08:00",
+          "recorded_start": "2026-11-02T14:40:00+08:00",
+          "recorded_end": "2026-11-02T15:00:00+08:00",
+          "finish_kind": "auto"
+        },
+        "expected": {
+          "planned_slots_completed": 1,
+          "early_slots_completed": 0,
+          "extended_slots_completed": 0,
+          "auto_deduction_slots": 1,
+          "tokens": 0
+        }
+      },
+      {
+        "id": "tokens-12",
+        "desc": "Early start, finished before the planned start",
+        "input": {
+          "original_start": "2026-11-02T14:00:00+08:00",
+          "original_end": "2026-11-02T15:00:00+08:00",
+          "recorded_start": "2026-11-02T13:40:00+08:00",
+          "recorded_end": "2026-11-02T14:00:00+08:00",
+          "finish_kind": "shortened"
+        },
+        "expected": {
+          "planned_slots_completed": 0,
+          "early_slots_completed": 1,
+          "extended_slots_completed": 0,
+          "auto_deduction_slots": 0,
+          "tokens": 5
+        }
+      },
+      {
+        "id": "tokens-13",
+        "desc": "Early, extended and on time",
+        "input": {
+          "original_start": "2026-11-02T14:00:00+08:00",
+          "original_end": "2026-11-02T15:00:00+08:00",
+          "recorded_start": "2026-11-02T13:40:00+08:00",
+          "recorded_end": "2026-11-02T15:20:00+08:00",
+          "finish_kind": "on_time"
+        },
+        "expected": {
+          "planned_slots_completed": 3,
+          "early_slots_completed": 1,
+          "extended_slots_completed": 1,
+          "auto_deduction_slots": 0,
+          "tokens": 40
+        }
+      },
+      {
+        "id": "tokens-14",
+        "desc": "Abandoned: nothing",
+        "input": {
+          "original_start": "2026-11-02T14:00:00+08:00",
+          "original_end": "2026-11-02T15:00:00+08:00",
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "recorded_end": null,
+          "finish_kind": "abandoned"
+        },
+        "expected": {
+          "planned_slots_completed": 0,
+          "early_slots_completed": 0,
+          "extended_slots_completed": 0,
+          "auto_deduction_slots": 0,
+          "tokens": 0
+        }
+      },
+      {
+        "id": "tokens-15",
+        "desc": "Missed (never started): nothing, no penalty",
+        "input": {
+          "original_start": "2026-11-02T14:00:00+08:00",
+          "original_end": "2026-11-02T15:00:00+08:00",
+          "recorded_start": null,
+          "recorded_end": null,
+          "finish_kind": "missed"
+        },
+        "expected": {
+          "planned_slots_completed": 0,
+          "early_slots_completed": 0,
+          "extended_slots_completed": 0,
+          "auto_deduction_slots": 0,
+          "tokens": 0
+        }
+      }
+    ],
+    "extend": [
+      {
+        "id": "extend-01",
+        "desc": "Pushes the event it runs into",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "in_progress"
+            },
+            {
+              "id": "B",
+              "start": "2026-11-02T15:00:00+08:00",
+              "end": "2026-11-02T15:40:00+08:00",
+              "status": "planned"
+            },
+            {
+              "id": "C",
+              "start": "2026-11-02T16:00:00+08:00",
+              "end": "2026-11-02T16:20:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "event_id": "A",
+          "slots": 1,
+          "now": "2026-11-02T14:30:00+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "00:00"
+        },
+        "expected": {
+          "ok": true,
+          "new_end": "2026-11-02T15:20:00+08:00",
+          "moved": [
+            {
+              "id": "B",
+              "start": "2026-11-02T15:20:00+08:00",
+              "end": "2026-11-02T16:00:00+08:00"
+            }
+          ],
+          "day_end_warnings": []
+        }
+      },
+      {
+        "id": "extend-02",
+        "desc": "Cascade through back-to-back events",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "in_progress"
+            },
+            {
+              "id": "B",
+              "start": "2026-11-02T15:00:00+08:00",
+              "end": "2026-11-02T15:40:00+08:00",
+              "status": "planned"
+            },
+            {
+              "id": "C",
+              "start": "2026-11-02T15:40:00+08:00",
+              "end": "2026-11-02T16:20:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "event_id": "A",
+          "slots": 1,
+          "now": "2026-11-02T14:30:00+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "00:00"
+        },
+        "expected": {
+          "ok": true,
+          "new_end": "2026-11-02T15:20:00+08:00",
+          "moved": [
+            {
+              "id": "B",
+              "start": "2026-11-02T15:20:00+08:00",
+              "end": "2026-11-02T16:00:00+08:00"
+            },
+            {
+              "id": "C",
+              "start": "2026-11-02T16:00:00+08:00",
+              "end": "2026-11-02T16:40:00+08:00"
+            }
+          ],
+          "day_end_warnings": []
+        }
+      },
+      {
+        "id": "extend-03",
+        "desc": "A gap absorbs a 1-slot extension: nothing moves",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "in_progress"
+            },
+            {
+              "id": "B",
+              "start": "2026-11-02T15:20:00+08:00",
+              "end": "2026-11-02T16:00:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "event_id": "A",
+          "slots": 1,
+          "now": "2026-11-02T14:30:00+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "00:00"
+        },
+        "expected": {
+          "ok": true,
+          "new_end": "2026-11-02T15:20:00+08:00",
+          "moved": [],
+          "day_end_warnings": []
+        }
+      },
+      {
+        "id": "extend-04",
+        "desc": "Moved events shift by the full extension, not the minimum",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "in_progress"
+            },
+            {
+              "id": "B",
+              "start": "2026-11-02T15:20:00+08:00",
+              "end": "2026-11-02T16:00:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "event_id": "A",
+          "slots": 2,
+          "now": "2026-11-02T14:30:00+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "00:00"
+        },
+        "expected": {
+          "ok": true,
+          "new_end": "2026-11-02T15:40:00+08:00",
+          "moved": [
+            {
+              "id": "B",
+              "start": "2026-11-02T16:00:00+08:00",
+              "end": "2026-11-02T16:40:00+08:00"
+            }
+          ],
+          "day_end_warnings": []
+        }
+      },
+      {
+        "id": "extend-05",
+        "desc": "An overlapping event that started earlier is not moved",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "in_progress"
+            },
+            {
+              "id": "P",
+              "start": "2026-11-02T14:20:00+08:00",
+              "end": "2026-11-02T16:00:00+08:00",
+              "status": "planned"
+            },
+            {
+              "id": "B",
+              "start": "2026-11-02T15:00:00+08:00",
+              "end": "2026-11-02T15:20:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "event_id": "A",
+          "slots": 1,
+          "now": "2026-11-02T14:30:00+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "00:00"
+        },
+        "expected": {
+          "ok": true,
+          "new_end": "2026-11-02T15:20:00+08:00",
+          "moved": [
+            {
+              "id": "B",
+              "start": "2026-11-02T15:20:00+08:00",
+              "end": "2026-11-02T15:40:00+08:00"
+            }
+          ],
+          "day_end_warnings": []
+        }
+      },
+      {
+        "id": "extend-06",
+        "desc": "Cancelled and missed events are ignored",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "in_progress"
+            },
+            {
+              "id": "B",
+              "start": "2026-11-02T15:00:00+08:00",
+              "end": "2026-11-02T15:20:00+08:00",
+              "status": "cancelled"
+            },
+            {
+              "id": "C",
+              "start": "2026-11-02T15:00:00+08:00",
+              "end": "2026-11-02T15:40:00+08:00",
+              "status": "missed"
+            }
+          ],
+          "event_id": "A",
+          "slots": 1,
+          "now": "2026-11-02T14:30:00+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "00:00"
+        },
+        "expected": {
+          "ok": true,
+          "new_end": "2026-11-02T15:20:00+08:00",
+          "moved": [],
+          "day_end_warnings": []
+        }
+      },
+      {
+        "id": "extend-07",
+        "desc": "Would push an event already in progress: rejected",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "in_progress"
+            },
+            {
+              "id": "C",
+              "start": "2026-11-02T15:00:00+08:00",
+              "end": "2026-11-02T15:20:00+08:00",
+              "status": "in_progress"
+            }
+          ],
+          "event_id": "A",
+          "slots": 1,
+          "now": "2026-11-02T15:01:00+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "00:00"
+        },
+        "expected": {
+          "ok": false,
+          "error": "pushed_event_locked",
+          "conflicts": [
+            "C"
+          ]
+        }
+      },
+      {
+        "id": "extend-08",
+        "desc": "Extend from the end prompt, last second",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "in_progress"
+            }
+          ],
+          "event_id": "A",
+          "slots": 1,
+          "now": "2026-11-02T15:05:00+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "00:00"
+        },
+        "expected": {
+          "ok": true,
+          "new_end": "2026-11-02T15:20:00+08:00",
+          "moved": [],
+          "day_end_warnings": []
+        }
+      },
+      {
+        "id": "extend-09",
+        "desc": "Too late to extend: already auto-finished",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "in_progress"
+            }
+          ],
+          "event_id": "A",
+          "slots": 1,
+          "now": "2026-11-02T15:05:01+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "00:00"
+        },
+        "expected": {
+          "ok": false,
+          "error": "window_closed"
+        }
+      },
+      {
+        "id": "extend-10",
+        "desc": "Zero slots is invalid",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "in_progress"
+            }
+          ],
+          "event_id": "A",
+          "slots": 0,
+          "now": "2026-11-02T14:30:00+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "00:00"
+        },
+        "expected": {
+          "ok": false,
+          "error": "invalid_slots"
+        }
+      },
+      {
+        "id": "extend-11",
+        "desc": "Only in-progress events can be extended",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "event_id": "A",
+          "slots": 1,
+          "now": "2026-11-02T14:30:00+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "00:00"
+        },
+        "expected": {
+          "ok": false,
+          "error": "not_in_progress"
+        }
+      },
+      {
+        "id": "extend-12",
+        "desc": "Push ending exactly at day end: no warning",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T22:00:00+08:00",
+              "end": "2026-11-02T23:00:00+08:00",
+              "status": "in_progress"
+            },
+            {
+              "id": "B",
+              "start": "2026-11-02T23:00:00+08:00",
+              "end": "2026-11-02T23:40:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "event_id": "A",
+          "slots": 1,
+          "now": "2026-11-02T22:30:00+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "00:00"
+        },
+        "expected": {
+          "ok": true,
+          "new_end": "2026-11-02T23:20:00+08:00",
+          "moved": [
+            {
+              "id": "B",
+              "start": "2026-11-02T23:20:00+08:00",
+              "end": "2026-11-03T00:00:00+08:00"
+            }
+          ],
+          "day_end_warnings": []
+        }
+      },
+      {
+        "id": "extend-13",
+        "desc": "Push past day end (00:00): allowed with a warning",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T22:00:00+08:00",
+              "end": "2026-11-02T23:00:00+08:00",
+              "status": "in_progress"
+            },
+            {
+              "id": "B",
+              "start": "2026-11-02T23:00:00+08:00",
+              "end": "2026-11-02T23:40:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "event_id": "A",
+          "slots": 2,
+          "now": "2026-11-02T22:30:00+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "00:00"
+        },
+        "expected": {
+          "ok": true,
+          "new_end": "2026-11-02T23:40:00+08:00",
+          "moved": [
+            {
+              "id": "B",
+              "start": "2026-11-02T23:40:00+08:00",
+              "end": "2026-11-03T00:20:00+08:00"
+            }
+          ],
+          "day_end_warnings": [
+            "B"
+          ]
+        }
+      },
+      {
+        "id": "extend-14",
+        "desc": "Same push with day end at 02:00: no warning",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T22:00:00+08:00",
+              "end": "2026-11-02T23:00:00+08:00",
+              "status": "in_progress"
+            },
+            {
+              "id": "B",
+              "start": "2026-11-02T23:00:00+08:00",
+              "end": "2026-11-02T23:40:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "event_id": "A",
+          "slots": 2,
+          "now": "2026-11-02T22:30:00+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "02:00"
+        },
+        "expected": {
+          "ok": true,
+          "new_end": "2026-11-02T23:40:00+08:00",
+          "moved": [
+            {
+              "id": "B",
+              "start": "2026-11-02T23:40:00+08:00",
+              "end": "2026-11-03T00:20:00+08:00"
+            }
+          ],
+          "day_end_warnings": []
+        }
+      },
+      {
+        "id": "extend-15",
+        "desc": "The extended event itself crossing day end is warned",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T23:00:00+08:00",
+              "end": "2026-11-02T23:40:00+08:00",
+              "status": "in_progress"
+            }
+          ],
+          "event_id": "A",
+          "slots": 2,
+          "now": "2026-11-02T23:10:00+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "00:00"
+        },
+        "expected": {
+          "ok": true,
+          "new_end": "2026-11-03T00:20:00+08:00",
+          "moved": [],
+          "day_end_warnings": [
+            "A"
+          ]
+        }
+      }
+    ],
+    "create": [
+      {
+        "id": "create-01",
+        "desc": "Third overlapping event is rejected",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "planned"
+            },
+            {
+              "id": "B",
+              "start": "2026-11-02T14:20:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "start": "2026-11-02T14:40:00+08:00",
+          "end": "2026-11-02T15:20:00+08:00"
+        },
+        "expected": {
+          "ok": false,
+          "error": "overlap_limit",
+          "conflicts": [
+            "A",
+            "B"
+          ]
+        }
+      },
+      {
+        "id": "create-02",
+        "desc": "Touching end-to-start is not overlap",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "planned"
+            },
+            {
+              "id": "B",
+              "start": "2026-11-02T14:20:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "start": "2026-11-02T15:00:00+08:00",
+          "end": "2026-11-02T15:20:00+08:00"
+        },
+        "expected": {
+          "ok": true
+        }
+      },
+      {
+        "id": "create-03",
+        "desc": "Overlapping only one of two events is fine",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "planned"
+            },
+            {
+              "id": "B",
+              "start": "2026-11-02T14:20:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "start": "2026-11-02T13:40:00+08:00",
+          "end": "2026-11-02T14:20:00+08:00"
+        },
+        "expected": {
+          "ok": true
+        }
+      },
+      {
+        "id": "create-04",
+        "desc": "Second overlapping event is fine",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "start": "2026-11-02T14:20:00+08:00",
+          "end": "2026-11-02T14:40:00+08:00"
+        },
+        "expected": {
+          "ok": true
+        }
+      },
+      {
+        "id": "create-05",
+        "desc": "Cancelled events don't count",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "planned"
+            },
+            {
+              "id": "B",
+              "start": "2026-11-02T14:20:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "cancelled"
+            }
+          ],
+          "start": "2026-11-02T14:40:00+08:00",
+          "end": "2026-11-02T15:20:00+08:00"
+        },
+        "expected": {
+          "ok": true
+        }
+      },
+      {
+        "id": "create-06",
+        "desc": "Start must be on a grid mark",
+        "input": {
+          "calendar": [],
+          "start": "2026-11-02T14:10:00+08:00",
+          "end": "2026-11-02T14:30:00+08:00"
+        },
+        "expected": {
+          "ok": false,
+          "error": "slot_misaligned"
+        }
+      },
+      {
+        "id": "create-07",
+        "desc": "Duration must be whole slots",
+        "input": {
+          "calendar": [],
+          "start": "2026-11-02T14:00:00+08:00",
+          "end": "2026-11-02T14:30:00+08:00"
+        },
+        "expected": {
+          "ok": false,
+          "error": "invalid_duration"
+        }
+      },
+      {
+        "id": "create-08",
+        "desc": "Zero duration is invalid",
+        "input": {
+          "calendar": [],
+          "start": "2026-11-02T14:00:00+08:00",
+          "end": "2026-11-02T14:00:00+08:00"
+        },
+        "expected": {
+          "ok": false,
+          "error": "invalid_duration"
+        }
+      }
+    ],
+    "timezone": [
+      {
+        "id": "tz-01",
+        "desc": "China, UTC+8",
+        "input": {
+          "timezone": "Asia/Shanghai"
+        },
+        "expected": {
+          "supported": true
+        }
+      },
+      {
+        "id": "tz-02",
+        "desc": "Hong Kong, UTC+8",
+        "input": {
+          "timezone": "Asia/Hong_Kong"
+        },
+        "expected": {
+          "supported": true
+        }
+      },
+      {
+        "id": "tz-03",
+        "desc": "Whole-hour DST shifts",
+        "input": {
+          "timezone": "America/New_York"
+        },
+        "expected": {
+          "supported": true
+        }
+      },
+      {
+        "id": "tz-04",
+        "desc": "UTC+0 / +1",
+        "input": {
+          "timezone": "Europe/London"
+        },
+        "expected": {
+          "supported": true
+        }
+      },
+      {
+        "id": "tz-05",
+        "desc": "India, +5:30",
+        "input": {
+          "timezone": "Asia/Kolkata"
+        },
+        "expected": {
+          "supported": false
+        }
+      },
+      {
+        "id": "tz-06",
+        "desc": "Nepal, +5:45",
+        "input": {
+          "timezone": "Asia/Kathmandu"
+        },
+        "expected": {
+          "supported": false
+        }
+      },
+      {
+        "id": "tz-07",
+        "desc": "+9:30 / +10:30",
+        "input": {
+          "timezone": "Australia/Adelaide"
+        },
+        "expected": {
+          "supported": false
+        }
+      },
+      {
+        "id": "tz-08",
+        "desc": "Half-hour DST",
+        "input": {
+          "timezone": "Australia/Lord_Howe"
+        },
+        "expected": {
+          "supported": false
+        }
+      },
+      {
+        "id": "tz-09",
+        "desc": "Newfoundland, -3:30 / -2:30",
+        "input": {
+          "timezone": "America/St_Johns"
+        },
+        "expected": {
+          "supported": false
+        }
+      },
+      {
+        "id": "tz-10",
+        "desc": "+12:45 / +13:45",
+        "input": {
+          "timezone": "Pacific/Chatham"
+        },
+        "expected": {
+          "supported": false
+        }
+      }
+    ]
+  }
+}
