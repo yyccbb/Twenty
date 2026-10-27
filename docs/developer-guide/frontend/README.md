@@ -91,7 +91,7 @@ Each native client keeps its own copy of the backend's `src/rules`, used only fo
 - **Constants:** come from the fixture file's `constants`. They are placeholders until the game design is final, so never hard-code them in UI copy.
 - **Don't edit the fixtures to make a test pass.** If you think a fixture is wrong, raise it: the backend and every client must change together.
 
-The grid math in brief: bar = 20 min, grid marks at :00/:20/:40, `snap(t)` is the mark `g` with `g − 15 min < t ≤ g + 5 min`, and a Cadenza may not overlap another Cadenza, while Tuttis overlap freely (intervals are half-open). Everything runs in UTC, which is correct because only whole-hour time zones are supported.
+The grid math in brief: bar = 20 min, grid marks at :00/:20/:40, a start tap snaps to the mark `g` with `g − 15 min < t ≤ g + 5 min`, a finish tap to the mark `g` with `g − 5 min < t ≤ g + 15 min` (so finishing more than 5 minutes early loses the last bar), and a Cadenza may not overlap another Cadenza, while Tuttis overlap freely (intervals are half-open). Everything runs in UTC, which is correct because only whole-hour time zones are supported.
 
 ## 8. Time zones and settings
 

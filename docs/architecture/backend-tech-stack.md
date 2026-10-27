@@ -85,13 +85,15 @@ Supporting them later means doing grid math in local time instead of UTC; the st
 
 ### 3.2 Snapping: one window per grid mark
 
-Every snap uses the same window. **A grid mark `g` owns the taps from 15 minutes before it to 5 minutes after it**:
+Start taps and finish taps each have their own window. Both give the same 5-minute grace after a mark.
 
 ```
-snap(t) = the grid mark g with  g − 15 min < t ≤ g + 5 min
+snap(t)        = the grid mark g with  g − 15 min < t ≤ g + 5 min     ← start taps (§3.3)
+finish_snap(t) = the grid mark g with  g − 5 min  < t ≤ g + 15 min    ← finish taps (§3.4)
 ```
 
-The 5-minute grace applies everywhere.
+- **Start:** a grid mark `g` owns the taps from 15 minutes before it to 5 minutes after it, so starting a little early counts as on time.
+- **Finish:** a grid mark `g` owns the taps from 5 minutes before it to 15 minutes after it, so a bar only counts as done if the user stays until 5 minutes before its end.
 
 ### 3.3 Starting a Cadenza
 
@@ -115,10 +117,18 @@ An early start is also **rejected** if the longer block would **overlap another 
 
 | What happens | Recorded end | Result |
 |---|---|---|
-| Finish tap in `(E − 15, E + 5]` | `E` | **On time** |
-| Finish tap earlier, e.g. `(E − 35, E − 15]` | `E − 20` (generally `snap(tap)`) | **Shortened** by the bars not done. Inferred from the tap; there's no separate "shorten" action. Later events are **not moved**. |
+| Finish tap in `(E − 5, E + 5]` | `E` | **On time** |
+| Finish tap earlier, e.g. `(E − 25, E − 5]` | `E − 20` (generally `finish_snap(tap)`) | **Shortened** by the bars not done. Inferred from the tap; there's no separate "shorten" action. Later events are **not moved**. |
 | No finish or extend by `E + 5` | `E` | **Auto-finished** by the app, **one bar of reward deducted** |
 | Finish tap snaps to ≤ recorded start | — | **Abandoned**, no reward |
+
+| Started 14:00, planned end 15:00, finish tap at | Recorded end | Result |
+|---|---|---|
+| 14:15 or earlier | — | **Abandoned** |
+| 14:15:01–14:35 | 14:20 | Shortened by 2 bars |
+| 14:35:01–14:55 | 14:40 | **Shortened by 1 bar** |
+| 14:55:01–15:05 | 15:00 | **On time** |
+| after 15:05, or no tap | 15:00 | **Auto-finished** |
 
 Auto-finish on the server is a delayed background job set for `E + 5` (pg-boss `startAfter`), rescheduled whenever `E` changes. A queued offline finish tap with a time after `E + 5` is treated as auto-finish.
 
@@ -370,7 +380,7 @@ These cost little now and are expensive to add later:
 | Q3 | Extend any time or from the end prompt; extensions push later **Cadenzas** by the **smallest shift** that clears each overlap (gaps are used up first); Tuttis never move; finishing early is an inferred shorten that moves nothing | §3.4, §3.5 |
 | Q4 | Offline taps are queued; server accepts device time within 24 h if the clock looks sane | §5.2 |
 | Q5 | Append-only ledger + versioned reward rules | §3.7, §4 |
-| Q6 | **Grace is 5 min everywhere**; one snapping window per mark: 15 min before to 5 min after | §3.2 |
+| Q6 | **Grace is 5 min everywhere**. Start window per mark: 15 min before to 5 min after. Finish window per mark: 5 min before to 15 min after, so on time is `(E − 5, E + 5]` | §3.2 |
 | Q7 | No action by `E + 5` → **auto-finish, one bar of reward deducted** | §3.4 |
 | Q8 | Rewards: on time = full; shortened or late = proportional; early and extended bars = **50% each** | §3.7 |
 | Q9 | A Cadenza never overlaps another Cadenza; Tuttis overlap without limit | §3.6 |

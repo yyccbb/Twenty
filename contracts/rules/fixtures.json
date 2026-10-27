@@ -15,7 +15,8 @@
   },
   "conventions": [
     "Times are ISO 8601 with offset; compare instants, not strings. Grid math runs in UTC (whole-hour zones only).",
-    "snap(t) = the grid mark g with g - 15 min < t <= g + 5 min.",
+    "snap(t) = the grid mark g with g - 15 min < t <= g + 5 min (start taps).",
+    "finish_snap(t) = the grid mark g with g - 5 min < t <= g + 15 min (finish taps), so on time is (planned_end - 5 min, planned_end + 5 min].",
     "Event intervals are half-open [start, end): an event ending at 15:00 does not overlap one starting at 15:00.",
     "Calendar entries carry kind: cadenza or tutti. Only Cadenzas are timed, so snap, start, finish and tokens cases always describe a Cadenza.",
     "A Cadenza may not overlap another Cadenza. Tuttis may overlap anything, without limit.",
@@ -393,11 +394,11 @@
     "finish": [
       {
         "id": "finish-01",
-        "desc": "Earliest on-time finish (15 min before end)",
+        "desc": "Earliest on-time finish (5 min before end)",
         "input": {
           "recorded_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
-          "tapped_at": "2026-11-02T14:45:01+08:00"
+          "tapped_at": "2026-11-02T14:55:01+08:00"
         },
         "expected": {
           "finish_kind": "on_time",
@@ -458,11 +459,11 @@
       },
       {
         "id": "finish-06",
-        "desc": "Shortened by 1 bar (last second of that window)",
+        "desc": "Exactly 5 min before the end loses the last bar",
         "input": {
           "recorded_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
-          "tapped_at": "2026-11-02T14:45:00+08:00"
+          "tapped_at": "2026-11-02T14:55:00+08:00"
         },
         "expected": {
           "finish_kind": "shortened",
@@ -475,7 +476,7 @@
         "input": {
           "recorded_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
-          "tapped_at": "2026-11-02T14:25:01+08:00"
+          "tapped_at": "2026-11-02T14:35:01+08:00"
         },
         "expected": {
           "finish_kind": "shortened",
@@ -488,7 +489,7 @@
         "input": {
           "recorded_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
-          "tapped_at": "2026-11-02T14:25:00+08:00"
+          "tapped_at": "2026-11-02T14:35:00+08:00"
         },
         "expected": {
           "finish_kind": "shortened",
@@ -501,7 +502,7 @@
         "input": {
           "recorded_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
-          "tapped_at": "2026-11-02T14:05:01+08:00"
+          "tapped_at": "2026-11-02T14:15:01+08:00"
         },
         "expected": {
           "finish_kind": "shortened",
@@ -510,11 +511,11 @@
       },
       {
         "id": "finish-10",
-        "desc": "Snaps back to the recorded start: abandoned",
+        "desc": "Snaps back to the recorded start: abandoned (last second)",
         "input": {
           "recorded_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
-          "tapped_at": "2026-11-02T14:05:00+08:00"
+          "tapped_at": "2026-11-02T14:15:00+08:00"
         },
         "expected": {
           "finish_kind": "abandoned"
@@ -556,6 +557,19 @@
         "expected": {
           "finish_kind": "shortened",
           "recorded_end": "2026-11-02T15:00:00+08:00"
+        }
+      },
+      {
+        "id": "finish-14",
+        "desc": "Finishing 10 min early loses the last bar",
+        "input": {
+          "recorded_start": "2026-11-02T14:00:00+08:00",
+          "planned_end": "2026-11-02T15:00:00+08:00",
+          "tapped_at": "2026-11-02T14:50:00+08:00"
+        },
+        "expected": {
+          "finish_kind": "shortened",
+          "recorded_end": "2026-11-02T14:40:00+08:00"
         }
       }
     ],
