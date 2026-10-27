@@ -1,6 +1,6 @@
 # Twenty developer guide
 
-Twenty is an iOS-first productivity app (web app later). Every calendar event is built from 20-minute slots, start and finish taps snap to that grid, completed events earn tokens that buy badges, and an AI turns long-term goals into slot-sized activities.
+Twenty is an iOS-first productivity app (web app later). Every calendar event is built from 20-minute bars and is one of two kinds. A **Cadenza** is focused work: the app prompts the user to start and finish it, the taps snap to the grid, and completing it earns tokens that buy badges. Cadenzas never overlap each other. A **Tutti** is an ordinary calendar event that can overlap anything. An AI turns long-term goals into bar-sized activities.
 
 This folder is for the people building it. Pick your guide:
 

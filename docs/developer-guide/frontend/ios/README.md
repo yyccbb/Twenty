@@ -36,9 +36,11 @@ The app schedules every notification itself. Each needs to be rescheduled when t
 | Notification | Scheduled from | Reschedule when |
 |---|---|---|
 | Planning prompt (e.g. nightly "plan tomorrow") | `settings.planning_prompts` (ISO weekday + `local_time`) | Settings change |
-| Start prompt | Event `planned_start` | Event created, moved or cancelled; a cascade moves it (`moved` in the extend response) |
-| Finish / end prompt | `planned_end` | After start (a late start shortens the event), extend or shorten |
-| Reminder occurrence | `/v1/calendar` occurrences (`at`) | Reminder or occurrence changes |
+| Start prompt | Cadenza `planned_start` | Cadenza created, moved, cancelled or switched kind; a cascade moves it (`moved` in the extend response) |
+| Finish / end prompt | Cadenza `planned_end` | After start (a late start shortens the event), extend or shorten |
+| Cue occurrence | `/v1/calendar` occurrences (`at`) | Cue or occurrence changes |
+
+Tuttis get no start or finish prompts.
 
 iOS allows at most **64 pending local notifications** per app. Schedule a rolling window (for example the next day or two) and top it up on launch and on background refresh, with jitter.
 
@@ -71,5 +73,5 @@ The spec's "late start" flow (§5.2): the app sends `start` and gets `recorded_s
 - [ ] Sends one `Idempotency-Key` per user action and reuses it on retry.
 - [ ] Sends `version` on edits and handles `version_conflict`.
 - [ ] Shows the local rules preview, then the server's result.
-- [ ] Handles `overlap_limit` by highlighting the `conflicts`.
+- [ ] Handles `cadenza_overlap` by highlighting the `conflicts`.
 - [ ] Reschedules affected local notifications.

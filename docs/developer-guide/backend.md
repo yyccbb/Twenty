@@ -84,9 +84,9 @@ Insert a new `reward_rules` row with the next version. Never update an existing 
 |---|---|
 | Token ledger is append-only; corrections are new entries | DB trigger rejects UPDATE/DELETE/TRUNCATE on `token_ledger` |
 | `users.token_balance` equals the ledger sum | `appendLedgerEntry` (`src/services/ledger.ts`) updates both in one transaction |
-| An event pays out once | Ledger `idempotency_key` is UNIQUE; rewards use `event_reward:<event_id>` |
+| A Cadenza pays out once | Ledger `idempotency_key` is UNIQUE; rewards use `event_reward:<event_id>` |
 | Retried writes don't repeat | `Idempotency-Key` middleware stores the first response (below 500) for 24 h and replays it |
-| Concurrent edits don't clobber | Events and reminders carry `version`; stale writes get `409 version_conflict` |
+| Concurrent edits don't clobber | Events and cues carry `version`; stale writes get `409 version_conflict` |
 | Recorded times are the server's | Clients send raw `tapped_at`; `src/rules` computes the rest |
 | Grid math in UTC | Only whole-hour time zones are supported (`isSupportedTimezone`) |
 | Primary keys are UUIDv7 | `uuidv7()` in `src/db/ids.ts` |
@@ -217,7 +217,7 @@ jobs:
 
 ## 10. Decisions the spec left open
 
-The backend made ten calls the spec didn't cover: late offline taps, the close_stale backstop, account deletion, unsupported time zones, the day-end anchor, reminder details, size caps, abandoned events, the AI limit's day, and refresh-token reuse. They are listed in the [backend README](../../../Twenty-backend/README.md#decisions-the-spec-left-open). If you change one, update that list.
+The backend made ten calls the spec didn't cover: late offline taps, the close_stale backstop, account deletion, unsupported time zones, the day-end anchor, cue details, size caps, abandoned events, the AI limit's day, and refresh-token reuse. They are listed in the [backend README](../../../Twenty-backend/README.md#decisions-the-spec-left-open). If you change one, update that list.
 
 ## 11. Troubleshooting
 

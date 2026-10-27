@@ -8,8 +8,8 @@ The backend's API reference is [`Twenty-backend/contracts/openapi.yaml`](../../.
 
 | The client owns | The server owns |
 |---|---|
-| UI and on-device cache | Accounts, calendar, reminders, settings |
-| Local notifications (planning, start and finish prompts, reminders); there are no push notifications in the MVP | Recorded start and finish times |
+| UI and on-device cache | Accounts, calendar, cues, settings |
+| Local notifications (planning, start and finish prompts, cues); there are no push notifications in the MVP | Recorded start and finish times |
 | Instant previews from its copy of the rules | Token amounts, balance, badges |
 | Queuing taps while offline | AI breakdowns (the API keys never leave the server) |
 
@@ -41,17 +41,18 @@ Store tokens in secure storage (Keychain on iOS), never in plain preferences.
 Every error has one shape:
 
 ```json
-{ "error": { "code": "overlap_limit", "message": "…", "conflicts": ["<event id>", "<event id>"] } }
+{ "error": { "code": "cadenza_overlap", "message": "…", "conflicts": ["<event id>"] } }
 ```
 
 Branch on `code`, never on `message` (messages are for logs and may change). Codes worth handling explicitly:
 
 | Code | Status | What the client should do |
 |---|---|---|
-| `overlap_limit` | 409 | More than 2 events would overlap. `conflicts` lists the clashing event IDs (sorted). Highlight them. |
+| `cadenza_overlap` | 409 | A Cadenza would overlap another Cadenza. `conflicts` lists the clashing Cadenza IDs (sorted). Highlight them. |
+| `not_cadenza` | 409 | Start, extend or finish was sent for a Tutti. Client bug: only show those actions on Cadenzas. |
 | `version_conflict` | 409 | Someone else changed this item. Refetch it, then reapply or ask the user. |
-| `slot_misaligned`, `invalid_duration`, `invalid_slots` | 422 | The client sent an off-grid start or a non-whole-slot length. That's a client bug: snap before sending. |
-| `too_early` | 422 | Start tapped more than 2 slots before the planned start. |
+| `bar_misaligned`, `invalid_duration`, `invalid_bars` | 422 | The client sent an off-grid start or a non-whole-bar length. That's a client bug: snap before sending. |
+| `too_early` | 422 | Start tapped more than 2 bars before the planned start. |
 | `tap_too_old`, `tap_in_future` | 422 | Offline tap older than 24 h, or the device clock is ahead by more than 2 min. Tell the user; drop the queued tap. |
 | `invalid_state` | 409 | For example, finishing an event that isn't in progress. Refetch the event. |
 | `unsupported_timezone` | 422 | The zone isn't a whole number of hours from UTC (India, Nepal, …). These zones aren't supported yet. |
@@ -66,19 +67,19 @@ Branch on `code`, never on `message` (messages are for logs and may change). Cod
 ## 5. Writes: Idempotency-Key and versions
 
 - **Send `Idempotency-Key` on every POST/PUT/PATCH/DELETE.** Generate one new UUID per *user action*, store it with the queued request, and reuse it for every retry of that action. The server replays the first response, marked with the `Idempotent-Replayed: true` header. A start or finish therefore never applies twice, and rewards are never paid twice.
-- **Optimistic locking:** events and reminders carry `version`. Send the version you last saw in `PATCH` bodies. A stale version returns `409 version_conflict`.
+- **Optimistic locking:** events and cues carry `version`. Send the version you last saw in `PATCH` bodies. A stale version returns `409 version_conflict`.
 - Reads (`GET`) return an `ETag`. Send `If-None-Match` on refreshes to get a cheap `304`.
 - Lists use cursor pagination: pass `limit` (1–200, default 50) and the previous response's `next_cursor`, until it is `null`.
 
 ## 6. Recording: start, extend, finish
 
-The heart of the app. Spec §3.2–§3.5 has the exact rules; in short:
+The heart of the app. Only **Cadenzas** are recorded; Tuttis have no start, extend or finish. Spec §3.2–§3.5 has the exact rules; in short:
 
 - **Send the raw tap time.** `POST /v1/events/{id}/start` and `/finish` take `{ tapped_at }`: the device time of the tap. Never send a snapped or computed time. The server snaps it to the 20-minute grid.
-- **Start:** the response has `outcome` (`early` / `on_time` / `late` / `missed`), `recorded_start`, `early_slots` and `late_slots`. A late start shortens the event, because the planned end doesn't move. Reschedule the finish notification from the response.
-- **Extend:** `POST /v1/events/{id}/extend { slots, dry_run }`. Call it with `dry_run: true` first to preview. The response lists every event the cascade would push (`moved`) and any `day_end_warnings`. Confirm with the user, then send it again with `dry_run: false`. Update every moved event locally from `moved`.
+- **Start:** the response has `outcome` (`early` / `on_time` / `late` / `missed`), `recorded_start`, `early_bars` and `late_bars`. A late start shortens the Cadenza, because the planned end doesn't move. Reschedule the finish notification from the response.
+- **Extend:** `POST /v1/events/{id}/extend { bars, dry_run }`. Call it with `dry_run: true` first to preview. The response lists every Cadenza the cascade would push (`moved`) and any `day_end_warnings`. Each moves only as far as needed, so gaps are used up first, and Tuttis never move. Confirm with the user, then send it again with `dry_run: false`. Update every moved event locally from `moved`.
 - **Finish:** the response has `finish_kind` (`on_time` / `shortened` / `abandoned` / `auto`), `recorded_end`, the token breakdown, `tokens_awarded` and the new `token_balance`.
-- **Auto-finish:** if the user does nothing by planned end + 5 min, the server finishes the event itself and deducts one slot of reward. Your next calendar refresh shows this.
+- **Auto-finish:** if the user does nothing by planned end + 5 min, the server finishes the Cadenza itself and deducts one bar of reward. Your next calendar refresh shows this.
 - **Offline:** queue start and finish taps with their original `tapped_at` and idempotency key, and send them in order once back online. The server accepts taps up to 24 h old.
 
 ## 7. The rules port (previews)
@@ -90,7 +91,7 @@ Each native client keeps its own copy of the backend's `src/rules`, used only fo
 - **Constants:** come from the fixture file's `constants`. They are placeholders until the game design is final, so never hard-code them in UI copy.
 - **Don't edit the fixtures to make a test pass.** If you think a fixture is wrong, raise it: the backend and every client must change together.
 
-The grid math in brief: slot = 20 min, grid marks at :00/:20/:40, `snap(t)` is the mark `g` with `g − 15 min < t ≤ g + 5 min`, and at most 2 events may overlap (intervals are half-open). Everything runs in UTC, which is correct because only whole-hour time zones are supported.
+The grid math in brief: bar = 20 min, grid marks at :00/:20/:40, `snap(t)` is the mark `g` with `g − 15 min < t ≤ g + 5 min`, and a Cadenza may not overlap another Cadenza, while Tuttis overlap freely (intervals are half-open). Everything runs in UTC, which is correct because only whole-hour time zones are supported.
 
 ## 8. Time zones and settings
 
@@ -98,13 +99,15 @@ The grid math in brief: slot = 20 min, grid marks at :00/:20/:40, `snap(t)` is t
 - When the device's zone changes, `PATCH /v1/me/settings` with the new `timezone`. If the zone isn't supported, show a clear "not supported yet" state instead of wrong times.
 - Planning prompts (`weekday` uses ISO numbering, 1 = Monday, plus `local_time`) are synced settings, but **each device schedules its own local notifications** from them.
 
-## 9. Calendar and reminders
+## 9. Calendar and cues
 
-- `GET /v1/calendar?from=&to=` returns events plus **expanded** reminder occurrences for the range (at most 62 days). Use it to draw the calendar and to schedule notifications. `GET /v1/events` lists events only (at most 92 days).
-- Reminders can be at any minute, have no duration and never earn tokens. Repeats use RFC 5545 `RRULE`, which the server expands.
+- Every event has a `kind`: `cadenza` or `tutti`. Both sit on the grid and last whole bars. Show the start/finish controls and token previews on Cadenzas only.
+- A planned event can switch kind with `PATCH`. Switching to Cadenza can fail with `cadenza_overlap`.
+- `GET /v1/calendar?from=&to=` returns events plus **expanded** cue occurrences for the range (at most 62 days). Use it to draw the calendar and to schedule notifications. `GET /v1/events` lists events only (at most 92 days).
+- Cues can be at any minute, have no duration and never earn tokens. Repeats use RFC 5545 `RRULE`, which the server expands.
 - An occurrence is identified by its **original** time (`original_at`), even after it is moved or snoozed. Its `at` is when it actually fires.
-- Mark one occurrence with `PUT /v1/reminders/{id}/occurrences/{original_at}` (done / skipped / snoozed / moved).
-- Editing or deleting a repeating reminder needs a `scope`:
+- Mark one occurrence with `PUT /v1/cues/{id}/occurrences/{original_at}` (done / skipped / snoozed / moved).
+- Editing or deleting a repeating cue needs a `scope`:
   - `this`: one occurrence; send `occurrence`.
   - `following`: splits the series at `occurrence`; the new part comes back as `created`.
   - `all`: the whole series.
@@ -115,8 +118,8 @@ The grid math in brief: slot = 20 min, grid marks at :00/:20/:40, `snap(t)` is t
 
 1. `POST /v1/goals/{id}/breakdowns` returns `202 { breakdown_id }`.
 2. Poll `GET /v1/breakdowns/{id}` about every 2 s. Status goes `queued` → `running` → `done` or `failed`.
-3. Show `items` (each has `duration_slots`, whole 20-minute slots). Let the user pick items and times.
-4. `POST /v1/breakdowns/{id}/accept { items: [{ item_id, planned_start, duration_slots?, title?, notes? }] }` creates all the events in one transaction. If any rule fails (overlap, off-grid), none are created.
+3. Show `items` (each has `duration_bars`, whole 20-minute bars). Let the user pick items and times.
+4. `POST /v1/breakdowns/{id}/accept { items: [{ item_id, planned_start, kind?, duration_bars?, title?, notes? }] }` creates all the events in one transaction (`kind` defaults to `cadenza`). If any rule fails (overlap, off-grid), none are created.
 
 ## 11. Network etiquette
 

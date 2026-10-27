@@ -1,6 +1,6 @@
 # Twenty: Backend Tech Stack and API Design (draft)
 
-*2026-10-25 · Draft for review · Scope: MVP test in China (one user, Alibaba Cloud Hong Kong), designed to grow into public iOS + web launch*
+*2026-10-25, updated 2026-10-27 (Cadenza and Tutti events, bars, cues) · Draft for review · Scope: MVP test in China (one user, Alibaba Cloud Hong Kong), designed to grow into public iOS + web launch*
 
 The questions at the end are the decisions only you can make. The rest is my recommendation, and you can annotate anything you disagree with.
 
@@ -13,7 +13,7 @@ The iOS app owns the UI, local notifications (nightly planning prompts, start/fi
 | Responsibility | Why it lives on the server |
 |---|---|
 | Accounts and sign-in | One identity across iOS and future web |
-| Calendar (planned events and reminders) | Synced across devices; web app reads the same data |
+| Calendar (planned events and cues) | Synced across devices; web app reads the same data |
 | Start/finish records and the 20-minute rules | Final recorded times must not be editable by the client |
 | Token ledger and badges | Currency must be tamper-proof; balance is derived from a ledger |
 | Goals and AI breakdown | AI API keys stay secret; prompts and cost limits are controlled centrally |
@@ -46,11 +46,24 @@ What the backend does **not** do in the MVP: send push notifications, real-time 
 
 A **pure, dependency-free module** (`backend/src/rules/`) holding every timing and token rule. The server's result is final. iOS has a Swift copy only to show results instantly ("you'll start at 14:20"). Both copies are tested against the same test cases in `contracts/rules/fixtures.json`.
 
+**Two kinds of events.** Every event has a `kind`:
+
+| | **Cadenza** | **Tutti** |
+|---|---|---|
+| Purpose | Focused work. The app prompts the user to start and finish it and times it. | An ordinary calendar event. |
+| Grid | Starts on a grid mark, lasts whole bars | Same |
+| Start, extend, finish (§3.3–§3.5) | Yes | No. The endpoints return `409 not_cadenza`. |
+| Tokens (§3.7) | Yes | Never |
+| Overlap (§3.6) | Never overlaps another Cadenza | Overlaps anything, without limit |
+| Moved by an extension's cascade (§3.5) | Yes | Never |
+
+The rules in §3.2–§3.5 and §3.7 apply to Cadenzas only.
+
 ### 3.1 The 20-minute grid and time zones
 
 - **Supported for now: time zones that are a whole number of hours from UTC** (including their daylight-saving shifts). For these, the local :00 / :20 / :40 marks are also UTC :00 / :20 / :40 marks, so **all grid math runs in UTC**. China (UTC+8), most of Europe, the Americas, Japan, Korea and most of Southeast Asia qualify.
 - All times are stored as UTC `timestamptz`. The user's IANA time zone (e.g. `Asia/Shanghai`) is kept for display, day boundaries and the day-end setting (§3.5).
-- Planned events: `start` must sit on a grid mark; `duration_slots` is an integer ≥ 1 (1 slot = 20 min).
+- Events of both kinds: `start` must sit on a grid mark; `duration_bars` is an integer ≥ 1 (1 bar = 20 min).
 
 **Out of scope for now: markets with non-whole-hour offsets.** The app warns users in these zones that they're unsupported:
 
@@ -80,92 +93,98 @@ snap(t) = the grid mark g with  g − 15 min < t ≤ g + 5 min
 
 The 5-minute grace applies everywhere.
 
-### 3.3 Starting an event
+### 3.3 Starting a Cadenza
 
-`recorded_start = snap(start tap)`. The **planned end stays fixed**. Starting early is allowed by **up to 2 slots (40 min)**.
+`recorded_start = snap(start tap)`. The **planned end stays fixed**. Starting early is allowed by **up to 2 bars (40 min)**.
 
 | Planned 14:00–15:00, start tap at | Recorded start | Result |
 |---|---|---|
-| 13:05 or earlier | — | **Rejected**: more than 2 slots early |
-| 13:05:01–13:25 | 13:20 | **Early by 2 slots** (block 13:20–15:00) |
-| 13:25:01–13:45 | 13:40 | Early by 1 slot |
+| 13:05 or earlier | — | **Rejected**: more than 2 bars early |
+| 13:05:01–13:25 | 13:20 | **Early by 2 bars** (block 13:20–15:00) |
+| 13:25:01–13:45 | 13:40 | Early by 1 bar |
 | 13:45:01–14:05 | 14:00 | **On time** |
-| 14:05:01–14:25 | 14:20 | **Late by 1 slot** (block 14:20–15:00) |
-| 14:25:01–14:45 | 14:40 | Late by 2 slots |
+| 14:05:01–14:25 | 14:20 | **Late by 1 bar** (block 14:20–15:00) |
+| 14:25:01–14:45 | 14:40 | Late by 2 bars |
 | after 14:45 | 15:00 = end | **Missed** |
 
-An early start is also **rejected** if the longer block would make **3 events overlap** (§3.6). The app then asks the user to move things first.
+An early start is also **rejected** if the longer block would **overlap another Cadenza** (§3.6). Tuttis don't matter. The app then asks the user to move things first.
 
-### 3.4 Finishing an event
+### 3.4 Finishing a Cadenza
 
-`E` is the event's current planned end (after any extension). From `E` to `E + 5 min` iOS shows a **"Finish or extend?"** prompt.
+`E` is the Cadenza's current planned end (after any extension). From `E` to `E + 5 min` iOS shows a **"Finish or extend?"** prompt.
 
 | What happens | Recorded end | Result |
 |---|---|---|
 | Finish tap in `(E − 15, E + 5]` | `E` | **On time** |
-| Finish tap earlier, e.g. `(E − 35, E − 15]` | `E − 20` (generally `snap(tap)`) | **Shortened** by the slots not done. Inferred from the tap; there's no separate "shorten" action. Later events are **not moved**. |
-| No finish or extend by `E + 5` | `E` | **Auto-finished** by the app, **one slot of reward deducted** |
+| Finish tap earlier, e.g. `(E − 35, E − 15]` | `E − 20` (generally `snap(tap)`) | **Shortened** by the bars not done. Inferred from the tap; there's no separate "shorten" action. Later events are **not moved**. |
+| No finish or extend by `E + 5` | `E` | **Auto-finished** by the app, **one bar of reward deducted** |
 | Finish tap snaps to ≤ recorded start | — | **Abandoned**, no reward |
 
 Auto-finish on the server is a delayed background job set for `E + 5` (pg-boss `startAfter`), rescheduled whenever `E` changes. A queued offline finish tap with a time after `E + 5` is treated as auto-finish.
 
-### 3.5 Extending an event
+### 3.5 Extending a Cadenza
 
-- The user can extend **at any time during the event**, or from the "Finish or extend?" prompt (between `E` and `E + 5`).
-- An extension adds whole slots: `E_new = E + 20 min × n`. The finish window and auto-finish then apply to `E_new`.
-- Later events that the extension now runs into are **pushed later** (cascade):
-  1. Find later events that start in `[E_old, E_new)`.
-  2. Shift each by the same amount (`E_new − E_old`), keeping its duration.
-  3. Repeat for anything the shifted events now run into.
-  4. Everything happens in **one transaction**. The response lists every moved event so iOS can reschedule their notifications. The app shows a **preview** first (`dry_run`).
-  5. If a pushed event is already in progress or done, or the push would break the overlap limit, the extension is rejected.
+- The user can extend **at any time during the Cadenza**, or from the "Finish or extend?" prompt (between `E` and `E + 5`).
+- An extension adds whole bars: `E_new = E + 20 min × n`. The finish window and auto-finish then apply to `E_new`.
+- Later **Cadenzas** that the extension now runs into are **pushed later** (cascade). Tuttis are never moved.
+  1. Go through the later Cadenzas in start order, starting from the end `edge = E_new`.
+  2. If a Cadenza starts before `edge`, shift it so it **starts exactly at `edge`**, keeping its duration. This is the smallest shift that clears the overlap, so any gap before it is used up first. Its new end becomes the new `edge`.
+  3. Stop at the first Cadenza that starts at or after `edge`; nothing after it moves.
+  4. Everything happens in **one transaction**. The response lists every moved Cadenza so iOS can reschedule their notifications. The app shows a **preview** first (`dry_run`).
+  5. If a Cadenza that would be pushed is already in progress or done, the extension is rejected (`pushed_event_locked`).
+
+  Example: A runs 14:00–15:00, B 15:20–16:00, C 16:20–16:40. Extending A by 3 bars to 16:00 moves B to 16:00–16:40 (40 min) and C to 16:40–17:00 (20 min).
 - **Day end:** the user sets when their day ends (`day_end_local_time`, default 00:00, e.g. 02:00). Pushes past it are **allowed but flagged with a warning** in the preview.
 
-### 3.6 Overlap limit
+### 3.6 Overlap rule
 
-A user's calendar may have **at most 2 events overlapping at any moment**. It is checked on create, edit, early start and extend. Reminders don't count. Violations return `409 overlap_limit` with the conflicting event IDs so the app can ask the user to shift things.
+**A Cadenza may never overlap another Cadenza**, so the user only ever has one focused task at a time. Tuttis may overlap Cadenzas and each other, without limit. Cues don't count.
+
+The rule is checked on create, on edit (including switching an event's kind) and on early start. Cancelled and missed Cadenzas are ignored. Violations return `409 cadenza_overlap` with the conflicting Cadenza IDs so the app can ask the user to shift things. Extensions can't break the rule, because the cascade moves every Cadenza in the way (§3.5).
+
+**Switching kinds:** a planned event can switch between Tutti and Cadenza with `PATCH`. Switching to Cadenza runs the overlap check. A Cadenza that has started, finished or been missed can't switch (`409 invalid_state`).
 
 ### 3.7 Tokens (placeholder values until the game design is finalized)
 
-`v` is the token value of one planned slot. Make it an **even whole number** (e.g. 10) so half-value slots stay whole numbers.
+`v` is the token value of one planned bar. Make it an **even whole number** (e.g. 10) so half-value bars stay whole numbers.
 
 ```
-tokens = v × planned_slots_completed               # full reward on time; proportional otherwise
-       + v × 0.5 × early_slots                     # early start: 50% per slot
-       + v × 0.5 × extended_slots_completed        # extension: 50% per slot
+tokens = v × planned_bars_completed                # full reward on time; proportional otherwise
+       + v × 0.5 × early_bars                      # early start: 50% per bar
+       + v × 0.5 × extended_bars_completed         # extension: 50% per bar
        − v × (1 if auto_finished else 0)           # no action by E + 5
 tokens = max(tokens, 0)
 ```
 
-- `planned_slots_completed` counts slots of the **original plan** that were actually done. Late starts and early finishes both reduce it, so the reward is `full reward × completed slots / planned slots`.
-- **Starting late costs exactly the reward of the missed slots, with no extra penalty.** A missed event (never started) earns nothing and costs nothing.
-- Unused extension slots cost nothing: extending by 2 then finishing after 1 earns 50% for that one slot.
+- `planned_bars_completed` counts bars of the **original plan** that were actually done. Late starts and early finishes both reduce it, so the reward is `full reward × completed bars / planned bars`.
+- **Starting late costs exactly the reward of the missed bars, with no extra penalty.** A missed Cadenza (never started) earns nothing and costs nothing.
+- Unused extension bars cost nothing: extending by 2 then finishing after 1 earns 50% for that one bar.
 
-| Planned 14:00–15:00 (3 slots), v = 10 | Tokens |
+| Planned 14:00–15:00 (3 bars), v = 10 | Tokens |
 |---|---|
 | Start on time, finish on time | **30** |
 | Start 14:20 (1 late), finish on time | 20 |
 | Start 13:40 (1 early), finish on time | 30 + 5 = **35** |
 | Start on time, finish at 14:40 (shortened) | 20 |
-| Start on time, extend 1 slot, finish 15:20 | 30 + 5 = **35** |
+| Start on time, extend 1 bar, finish 15:20 | 30 + 5 = **35** |
 | Start on time, no action by 15:05 (auto-finish) | 30 − 10 = **20** |
 
 - Every parameter (`v`, the 50% rates, the auto-finish deduction) lives in a server-side `reward_rules` config row with a version number, so it can change without an app release. Each ledger entry records the rule version used.
-- Reminders are never rewardable.
+- Only Cadenzas earn tokens. Tuttis and cues never do.
 
-### 3.8 Reminders
+### 3.8 Cues
 
-A **reminder** is a separate kind of item: a title and a time, **no duration, no start/finish, no tokens**. iOS fires a local notification at that time; the user can mark an occurrence done, skip it or snooze it.
+A **cue** is a reminder, a separate kind of item: a title and a time, **no duration, no start/finish, no tokens**. iOS fires a local notification at that time; the user can mark an occurrence done, skip it or snooze it.
 
 - **Any minute** is allowed, not just grid marks.
 - **Full calendar-style repeat rules**, stored as an RFC 5545 `RRULE` string (the iCalendar standard Apple Calendar and Google Calendar use), e.g. `FREQ=MONTHLY;BYDAY=2TU` = every 2nd Tuesday. Rules are expanded with the `rrule` npm library on the server.
 - **Per-occurrence state** (done, skipped, snoozed, moved) lives in its own table, keyed by the occurrence's original time.
-- **Editing a repeating reminder** offers the same three scopes as Apple Calendar:
+- **Editing a repeating cue** offers the same three scopes as Apple Calendar:
   - **This occurrence:** stored as a per-occurrence override (`moved` / `skipped`) or a changed copy of that one occurrence.
-  - **This and following:** the series is **split**. The old rule gets an `UNTIL` just before the chosen occurrence, and a new reminder starts there with the edited fields. Both share a `series_id` so the app can show them as one series. Overrides after the split point move to the new reminder.
+  - **This and following:** the series is **split**. The old rule gets an `UNTIL` just before the chosen occurrence, and a new cue starts there with the edited fields. Both share a `series_id` so the app can show them as one series. Overrides after the split point move to the new cue.
   - **All occurrences:** edit the rule in place and keep overrides whose original time still exists in the new rule.
-- Reminders are never pushed by cascades and don't count toward the overlap limit.
-- **iOS limit to design around:** iOS keeps at most **64 pending local notifications per app**, and its built-in repeating triggers can't express rules like "every 2nd Tuesday". The app therefore schedules a **rolling window** (the next ~48 hours of events, reminders and planning prompts, capped below 64) and refreshes it on app open and in background refresh. The server's `GET /v1/calendar` returns expanded occurrences, so iOS doesn't need its own repeat-rule engine.
+- Cues are never pushed by cascades and don't count toward the overlap rule.
+- **iOS limit to design around:** iOS keeps at most **64 pending local notifications per app**, and its built-in repeating triggers can't express rules like "every 2nd Tuesday". The app therefore schedules a **rolling window** (the next ~48 hours of events, cues and planning prompts, capped below 64) and refreshes it on app open and in background refresh. The server's `GET /v1/calendar` returns expanded occurrences, so iOS doesn't need its own repeat-rule engine.
 
 ---
 
@@ -180,19 +199,20 @@ goals            id, user_id, title, description, target_date, status
 ai_breakdowns    id, goal_id, status(queued|running|done|failed), model, prompt_version,
                  result (JSONB: suggested activities), tokens_used, created_at
 events           id, user_id, title, notes, goal_id?, breakdown_item_id?,
-                 planned_start (timestamptz, on grid), duration_slots (int ≥ 1),
-                 rewardable (bool), status(planned|in_progress|done|missed|cancelled),
+                 kind(cadenza|tutti),
+                 planned_start (timestamptz, on grid), duration_bars (int ≥ 1),
+                 status(planned|in_progress|done|missed|cancelled),           ← Tuttis use planned|cancelled only
                  version (optimistic locking)
-event_records    event_id (PK), start_tapped_at, finish_tapped_at,          ← raw device times
-                 recorded_start, recorded_end, late_slots, early_slots,      ← computed by server
-                 extended_slots, finish_kind(on_time|shortened|auto|abandoned),
-                 original_planned_start, original_planned_end, rules_version ← plan before early start / extend / shift
-event_changes    id, event_id, kind(extend|cascade_shift|early_start), delta_slots,
+event_records    event_id (PK), start_tapped_at, finish_tapped_at,           ← Cadenzas only; raw device times
+                 recorded_start, recorded_end, late_bars, early_bars,         ← computed by server
+                 extended_bars, finish_kind(on_time|shortened|auto|abandoned),
+                 original_planned_start, original_planned_end, rules_version  ← plan before early start / extend / shift
+event_changes    id, event_id, kind(extend|cascade_shift|early_start), delta_bars,
                  caused_by_event_id?, created_at                              ← audit trail for shifts
-reminders        id, user_id, series_id, title, notes, dtstart (timestamptz), timezone,
+cues             id, user_id, series_id, title, notes, dtstart (timestamptz), timezone,
                  rrule? (RFC 5545 string), until?, version
-reminder_occurrences  reminder_id, original_at, status(done|skipped|snoozed|moved),
-                 new_at?  (PK: reminder_id + original_at)
+cue_occurrences  cue_id, original_at, status(done|skipped|snoozed|moved),
+                 new_at?  (PK: cue_id + original_at)
 
 token_ledger     id, user_id, delta (int, ±), reason(event_reward|badge_redeem|adjustment),
                  ref_id, rules_version, idempotency_key UNIQUE, created_at
@@ -207,7 +227,7 @@ The ledger is **append-only**: no updates or deletes; corrections are new entrie
 
 ## 5. API style and endpoints
 
-**Style:** REST + JSON over HTTPS, versioned under `/v1`, described by the generated OpenAPI spec. Every write that changes state accepts an `Idempotency-Key` header. Errors use one shape: `{ "error": { "code": "slot_misaligned", "message": "..." } }`.
+**Style:** REST + JSON over HTTPS, versioned under `/v1`, described by the generated OpenAPI spec. Every write that changes state accepts an `Idempotency-Key` header. Errors use one shape: `{ "error": { "code": "bar_misaligned", "message": "..." } }`.
 
 ### 5.1 Endpoint list
 
@@ -220,18 +240,18 @@ The ledger is **append-only**: no updates or deletes; corrections are new entrie
 | | `PATCH /v1/me/settings` | Time zone, planning-prompt schedule, preferences |
 | | `DELETE /v1/me` | Account deletion (**required by App Store rules** for apps with sign-in) |
 | **Calendar** | `GET /v1/events?from=&to=` | Events in a date range |
-| | `POST /v1/events` | Create; rejects off-grid start or non-integer slots |
-| | `PATCH /v1/events/{id}` | Reschedule / edit (uses `version` for conflict detection) |
+| | `POST /v1/events` | Create a Cadenza or Tutti (`kind`); rejects off-grid start, non-integer bars, or a Cadenza overlapping another (`409 cadenza_overlap`) |
+| | `PATCH /v1/events/{id}` | Reschedule / edit / switch `kind` (uses `version` for conflict detection) |
 | | `DELETE /v1/events/{id}` | Cancel |
-| | `GET /v1/calendar?from=&to=` | Events + **expanded** reminder occurrences in one call (also what iOS uses to schedule notifications) |
-| **Recording** | `POST /v1/events/{id}/start` | Body `{tapped_at}` → `recorded_start`, early/late slots; `409 overlap_limit` if an early start would make 3 events overlap |
-| | `POST /v1/events/{id}/extend` | Body `{slots, dry_run?}` (in progress only) → new end; returns **every event pushed by the cascade** and day-end warnings. `dry_run: true` returns the preview without saving |
+| | `GET /v1/calendar?from=&to=` | Events + **expanded** cue occurrences in one call (also what iOS uses to schedule notifications) |
+| **Recording** (Cadenzas only; a Tutti gets `409 not_cadenza`) | `POST /v1/events/{id}/start` | Body `{tapped_at}` → `recorded_start`, early/late bars; `409 cadenza_overlap` if an early start would overlap another Cadenza |
+| | `POST /v1/events/{id}/extend` | Body `{bars, dry_run?}` (in progress only) → new end; returns **every Cadenza pushed by the cascade** and day-end warnings. `dry_run: true` returns the preview without saving |
 | | `POST /v1/events/{id}/finish` | Body `{tapped_at}` → `recorded_end`, finish kind (on time / shortened / abandoned), **tokens awarded** |
-| **Reminders** | `GET/POST/PATCH/DELETE /v1/reminders[/{id}]` | CRUD for reminders, including repeat rules. `PATCH` and `DELETE` on a repeating reminder take `{scope: this \| following \| all, occurrence}` |
-| | `PUT /v1/reminders/{id}/occurrences/{original_at}` | Mark one occurrence done / skipped / snoozed / moved |
+| **Cues** | `GET/POST/PATCH/DELETE /v1/cues[/{id}]` | CRUD for cues, including repeat rules. `PATCH` and `DELETE` on a repeating cue take `{scope: this \| following \| all, occurrence}` |
+| | `PUT /v1/cues/{id}/occurrences/{original_at}` | Mark one occurrence done / skipped / snoozed / moved |
 | **Goals & AI** | `GET/POST/PATCH/DELETE /v1/goals[/{id}]` | Long-term goals CRUD |
 | | `POST /v1/goals/{id}/breakdowns` | Start AI breakdown → `202 {breakdown_id}` (background job) |
-| | `GET /v1/breakdowns/{id}` | Poll status + suggested activities (each sized in 20-min slots) |
+| | `GET /v1/breakdowns/{id}` | Poll status + suggested activities (each sized in 20-min bars) |
 | | `POST /v1/breakdowns/{id}/accept` | Body: chosen items + times → creates events in one transaction |
 | **Tokens & badges** | `GET /v1/tokens/ledger?cursor=` | Paged token history |
 | | `GET /v1/badges` | Badge catalog + which ones the user owns |
@@ -242,12 +262,12 @@ About 30 endpoints. Deliberately absent for the MVP: a general sync endpoint, We
 
 ### 5.2 Key flows
 
-**Start an event (late):**
+**Start a Cadenza (late):**
 ```
 iOS  ── POST /v1/events/42/start {tapped_at: 14:07:12+08:00}, Idempotency-Key ──▶ API
 API  : check tapped_at against server time (offline tolerance, §8.1 Q4)
-API  : rules.recordStart(S=14:00, t=14:07:12) → recorded_start 14:20, late_slots 1
-API  ◀── 200 {recorded_start: "14:20", late_slots: 1} ── 
+API  : rules.recordStart(S=14:00, t=14:07:12) → recorded_start 14:20, late_bars 1
+API  ◀── 200 {recorded_start: "14:20", late_bars: 1} ── 
 iOS  : reschedules the "finish" local notification for the new duration
 ```
 
@@ -255,9 +275,9 @@ iOS  : reschedules the "finish" local notification for the new duration
 ```
 iOS ── POST /goals/7/breakdowns ──▶ API ── enqueue (pg-boss) ──▶ worker
 worker ── prompt + JSON schema ──▶ Qwen (Model Studio)
-worker : validate with Zod (durations must be whole 20-min slots; reject/repair otherwise)
+worker : validate with Zod (durations must be whole 20-min bars; reject/repair otherwise)
 iOS ── GET /breakdowns/99 (poll every 2 s) ──▶ status: done, items[...]
-iOS ── POST /breakdowns/99/accept {items + chosen slots} ──▶ events created
+iOS ── POST /breakdowns/99/accept {items + chosen bars} ──▶ events created
 ```
 
 ### 5.3 Background jobs (pg-boss)
@@ -265,8 +285,8 @@ iOS ── POST /breakdowns/99/accept {items + chosen slots} ──▶ events cr
 | Job | When | What |
 |---|---|---|
 | `ai.breakdown` | On request | Call the AI model, validate the output, store the result |
-| `events.auto_finish` | Delayed job at `E + 5` per in-progress event | Auto-finish with one slot deducted (§3.4); rescheduled on extend |
-| `events.close_stale` | Every 20 min | Events whose planned end passed with no start → `missed` |
+| `events.auto_finish` | Delayed job at `E + 5` per in-progress Cadenza | Auto-finish with one bar deducted (§3.4); rescheduled on extend |
+| `events.close_stale` | Every 20 min | Cadenzas whose planned end passed with no start → `missed` (Tuttis are left alone) |
 | `db.backup` | Nightly (or host cron) | `pg_dump` → Alibaba Cloud OSS |
 
 AI cost guard: per-user daily limit on breakdown requests, enforced in the API.
@@ -343,20 +363,22 @@ These cost little now and are expensive to add later:
 | # | Decision | Where |
 |---|---|---|
 | Q1 | Backend language: **TypeScript (Node + Hono)** | §2 |
-| Q2 | Early start allowed **up to 2 slots**, using the shared snapping window | §3.2, §3.3 |
-| Q3 | Extend any time or from the end prompt; extensions push later events; finishing early is an inferred shorten that moves nothing | §3.4, §3.5 |
+| Q2 | Early start allowed **up to 2 bars**, using the shared snapping window | §3.2, §3.3 |
+| Q3 | Extend any time or from the end prompt; extensions push later **Cadenzas** by the **smallest shift** that clears each overlap (gaps are used up first); Tuttis never move; finishing early is an inferred shorten that moves nothing | §3.4, §3.5 |
 | Q4 | Offline taps are queued; server accepts device time within 24 h if the clock looks sane | §5.2 |
 | Q5 | Append-only ledger + versioned reward rules | §3.7, §4 |
 | Q6 | **Grace is 5 min everywhere**; one snapping window per mark: 15 min before to 5 min after | §3.2 |
-| Q7 | No action by `E + 5` → **auto-finish, one slot of reward deducted** | §3.4 |
-| Q8 | Rewards: on time = full; shortened or late = proportional; early and extended slots = **50% each** | §3.7 |
-| Q9 | At most 2 overlapping events, enforced everywhere | §3.6 |
+| Q7 | No action by `E + 5` → **auto-finish, one bar of reward deducted** | §3.4 |
+| Q8 | Rewards: on time = full; shortened or late = proportional; early and extended bars = **50% each** | §3.7 |
+| Q9 | A Cadenza never overlaps another Cadenza; Tuttis overlap without limit | §3.6 |
 | Q10 | Pushes past a **user-set day end** are allowed with a warning | §3.5 |
-| Q11 | Reminders: **any minute**, **full RRULE repeats** | §3.8 |
+| Q11 | Cues: **any minute**, **full RRULE repeats** | §3.8 |
 | Q12 | Only **whole-hour time zones** for now; others listed as out of scope | §3.1 |
-| Q13 | Late start loses only the missed slots' reward, **no extra penalty** | §3.7 |
+| Q13 | Late start loses only the missed bars' reward, **no extra penalty** | §3.7 |
 | Q14 | Missed (never started) events **cost nothing** | §3.7 |
-| Q15 | Repeating reminders support **this / this and following / all** edits | §3.8 |
+| Q15 | Repeating cues support **this / this and following / all** edits | §3.8 |
+| Q16 | Two kinds of events: **Cadenza** (timed, rewarded) and **Tutti** (ordinary). Both use the grid; only Cadenzas earn tokens; planned events can switch kind | §3, §3.6 |
+| Q17 | Names: a 20-minute unit is a **bar**; a reminder is a **cue** | §3.1, §3.8 |
 
 ### 8.2 Still open
 

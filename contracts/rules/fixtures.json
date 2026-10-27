@@ -2,25 +2,27 @@
   "fixtures_version": 1,
   "rules_doc": "docs/architecture/backend-tech-stack.md §3",
   "constants": {
-    "slot_minutes": 20,
+    "bar_minutes": 20,
     "snap_before_minutes": 15,
     "snap_after_minutes": 5,
-    "max_early_slots": 2,
-    "max_overlapping_events": 2,
+    "max_early_bars": 2,
     "reward": {
-      "tokens_per_slot": 10,
-      "early_slot_rate": 0.5,
-      "extended_slot_rate": 0.5,
-      "auto_finish_deduction_slots": 1
+      "tokens_per_bar": 10,
+      "early_bar_rate": 0.5,
+      "extended_bar_rate": 0.5,
+      "auto_finish_deduction_bars": 1
     }
   },
   "conventions": [
     "Times are ISO 8601 with offset; compare instants, not strings. Grid math runs in UTC (whole-hour zones only).",
     "snap(t) = the grid mark g with g - 15 min < t <= g + 5 min.",
     "Event intervals are half-open [start, end): an event ending at 15:00 does not overlap one starting at 15:00.",
+    "Calendar entries carry kind: cadenza or tutti. Only Cadenzas are timed, so snap, start, finish and tokens cases always describe a Cadenza.",
+    "A Cadenza may not overlap another Cadenza. Tuttis may overlap anything, without limit.",
     "tapped_at = null in finish cases means the auto-finish job fired at planned_end + 5 min.",
     "Conflict and warning ID lists are sorted. Expected objects must match exactly (no extra keys).",
-    "Events with status cancelled or missed are ignored by overlap checks and cascades."
+    "Events with status cancelled or missed are ignored by overlap checks and cascades.",
+    "In create cases, event_id (when present) names an existing event being edited; it is left out of its own overlap check."
   ],
   "groups": {
     "snap": [
@@ -108,7 +110,7 @@
     "start": [
       {
         "id": "start-01",
-        "desc": "More than 2 slots early is rejected",
+        "desc": "More than 2 bars early is rejected",
         "input": {
           "planned_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
@@ -121,7 +123,7 @@
       },
       {
         "id": "start-02",
-        "desc": "Earliest allowed tap: 2 slots early",
+        "desc": "Earliest allowed tap: 2 bars early",
         "input": {
           "planned_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
@@ -130,13 +132,13 @@
         "expected": {
           "outcome": "early",
           "recorded_start": "2026-11-02T13:20:00+08:00",
-          "early_slots": 2,
-          "late_slots": 0
+          "early_bars": 2,
+          "late_bars": 0
         }
       },
       {
         "id": "start-03",
-        "desc": "Still 2 slots early at end of window",
+        "desc": "Still 2 bars early at end of window",
         "input": {
           "planned_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
@@ -145,13 +147,13 @@
         "expected": {
           "outcome": "early",
           "recorded_start": "2026-11-02T13:20:00+08:00",
-          "early_slots": 2,
-          "late_slots": 0
+          "early_bars": 2,
+          "late_bars": 0
         }
       },
       {
         "id": "start-04",
-        "desc": "1 slot early",
+        "desc": "1 bar early",
         "input": {
           "planned_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
@@ -160,13 +162,13 @@
         "expected": {
           "outcome": "early",
           "recorded_start": "2026-11-02T13:40:00+08:00",
-          "early_slots": 1,
-          "late_slots": 0
+          "early_bars": 1,
+          "late_bars": 0
         }
       },
       {
         "id": "start-05",
-        "desc": "1 slot early, last second",
+        "desc": "1 bar early, last second",
         "input": {
           "planned_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
@@ -175,8 +177,8 @@
         "expected": {
           "outcome": "early",
           "recorded_start": "2026-11-02T13:40:00+08:00",
-          "early_slots": 1,
-          "late_slots": 0
+          "early_bars": 1,
+          "late_bars": 0
         }
       },
       {
@@ -190,8 +192,8 @@
         "expected": {
           "outcome": "on_time",
           "recorded_start": "2026-11-02T14:00:00+08:00",
-          "early_slots": 0,
-          "late_slots": 0
+          "early_bars": 0,
+          "late_bars": 0
         }
       },
       {
@@ -205,8 +207,8 @@
         "expected": {
           "outcome": "on_time",
           "recorded_start": "2026-11-02T14:00:00+08:00",
-          "early_slots": 0,
-          "late_slots": 0
+          "early_bars": 0,
+          "late_bars": 0
         }
       },
       {
@@ -220,13 +222,13 @@
         "expected": {
           "outcome": "on_time",
           "recorded_start": "2026-11-02T14:00:00+08:00",
-          "early_slots": 0,
-          "late_slots": 0
+          "early_bars": 0,
+          "late_bars": 0
         }
       },
       {
         "id": "start-09",
-        "desc": "Late by 1 slot",
+        "desc": "Late by 1 bar",
         "input": {
           "planned_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
@@ -235,13 +237,13 @@
         "expected": {
           "outcome": "late",
           "recorded_start": "2026-11-02T14:20:00+08:00",
-          "early_slots": 0,
-          "late_slots": 1
+          "early_bars": 0,
+          "late_bars": 1
         }
       },
       {
         "id": "start-10",
-        "desc": "Late by 1 slot, last second",
+        "desc": "Late by 1 bar, last second",
         "input": {
           "planned_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
@@ -250,13 +252,13 @@
         "expected": {
           "outcome": "late",
           "recorded_start": "2026-11-02T14:20:00+08:00",
-          "early_slots": 0,
-          "late_slots": 1
+          "early_bars": 0,
+          "late_bars": 1
         }
       },
       {
         "id": "start-11",
-        "desc": "Late by 2 slots",
+        "desc": "Late by 2 bars",
         "input": {
           "planned_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
@@ -265,13 +267,13 @@
         "expected": {
           "outcome": "late",
           "recorded_start": "2026-11-02T14:40:00+08:00",
-          "early_slots": 0,
-          "late_slots": 2
+          "early_bars": 0,
+          "late_bars": 2
         }
       },
       {
         "id": "start-12",
-        "desc": "Late by 2 slots, last second",
+        "desc": "Late by 2 bars, last second",
         "input": {
           "planned_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
@@ -280,8 +282,8 @@
         "expected": {
           "outcome": "late",
           "recorded_start": "2026-11-02T14:40:00+08:00",
-          "early_slots": 0,
-          "late_slots": 2
+          "early_bars": 0,
+          "late_bars": 2
         }
       },
       {
@@ -298,7 +300,7 @@
       },
       {
         "id": "start-14",
-        "desc": "1-slot event started late is missed",
+        "desc": "1-bar event started late is missed",
         "input": {
           "planned_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T14:20:00+08:00",
@@ -310,7 +312,7 @@
       },
       {
         "id": "start-15",
-        "desc": "Early start that would make 3 events overlap is rejected",
+        "desc": "Early start that would overlap another Cadenza is rejected",
         "input": {
           "planned_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
@@ -319,16 +321,19 @@
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T13:00:00+08:00",
               "end": "2026-11-02T14:00:00+08:00"
             },
             {
               "id": "B",
+              "kind": "tutti",
               "start": "2026-11-02T13:20:00+08:00",
               "end": "2026-11-02T14:00:00+08:00"
             },
             {
               "id": "X",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00"
             }
@@ -336,16 +341,15 @@
         },
         "expected": {
           "outcome": "rejected",
-          "error": "overlap_limit",
+          "error": "cadenza_overlap",
           "conflicts": [
-            "A",
-            "B"
+            "A"
           ]
         }
       },
       {
         "id": "start-16",
-        "desc": "Early start touching (not overlapping) two events is allowed",
+        "desc": "Early start touching a Cadenza and overlapping Tuttis is allowed",
         "input": {
           "planned_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
@@ -354,16 +358,25 @@
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T13:00:00+08:00",
               "end": "2026-11-02T13:40:00+08:00"
             },
             {
               "id": "B",
+              "kind": "tutti",
               "start": "2026-11-02T13:20:00+08:00",
-              "end": "2026-11-02T13:40:00+08:00"
+              "end": "2026-11-02T14:00:00+08:00"
+            },
+            {
+              "id": "C",
+              "kind": "tutti",
+              "start": "2026-11-02T13:40:00+08:00",
+              "end": "2026-11-02T14:20:00+08:00"
             },
             {
               "id": "X",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00"
             }
@@ -372,8 +385,8 @@
         "expected": {
           "outcome": "early",
           "recorded_start": "2026-11-02T13:40:00+08:00",
-          "early_slots": 1,
-          "late_slots": 0
+          "early_bars": 1,
+          "late_bars": 0
         }
       }
     ],
@@ -445,7 +458,7 @@
       },
       {
         "id": "finish-06",
-        "desc": "Shortened by 1 slot (last second of that window)",
+        "desc": "Shortened by 1 bar (last second of that window)",
         "input": {
           "recorded_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
@@ -458,7 +471,7 @@
       },
       {
         "id": "finish-07",
-        "desc": "Shortened by 1 slot (first second of that window)",
+        "desc": "Shortened by 1 bar (first second of that window)",
         "input": {
           "recorded_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
@@ -471,7 +484,7 @@
       },
       {
         "id": "finish-08",
-        "desc": "Shortened by 2 slots",
+        "desc": "Shortened by 2 bars",
         "input": {
           "recorded_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
@@ -484,7 +497,7 @@
       },
       {
         "id": "finish-09",
-        "desc": "Shortened to a single slot",
+        "desc": "Shortened to a single bar",
         "input": {
           "recorded_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
@@ -558,16 +571,16 @@
           "finish_kind": "on_time"
         },
         "expected": {
-          "planned_slots_completed": 3,
-          "early_slots_completed": 0,
-          "extended_slots_completed": 0,
-          "auto_deduction_slots": 0,
+          "planned_bars_completed": 3,
+          "early_bars_completed": 0,
+          "extended_bars_completed": 0,
+          "auto_deduction_bars": 0,
           "tokens": 30
         }
       },
       {
         "id": "tokens-02",
-        "desc": "Late by 1 slot: loses that slot only",
+        "desc": "Late by 1 bar: loses that bar only",
         "input": {
           "original_start": "2026-11-02T14:00:00+08:00",
           "original_end": "2026-11-02T15:00:00+08:00",
@@ -576,16 +589,16 @@
           "finish_kind": "on_time"
         },
         "expected": {
-          "planned_slots_completed": 2,
-          "early_slots_completed": 0,
-          "extended_slots_completed": 0,
-          "auto_deduction_slots": 0,
+          "planned_bars_completed": 2,
+          "early_bars_completed": 0,
+          "extended_bars_completed": 0,
+          "auto_deduction_bars": 0,
           "tokens": 20
         }
       },
       {
         "id": "tokens-03",
-        "desc": "Early by 1 slot: +50% of a slot",
+        "desc": "Early by 1 bar: +50% of a bar",
         "input": {
           "original_start": "2026-11-02T14:00:00+08:00",
           "original_end": "2026-11-02T15:00:00+08:00",
@@ -594,16 +607,16 @@
           "finish_kind": "on_time"
         },
         "expected": {
-          "planned_slots_completed": 3,
-          "early_slots_completed": 1,
-          "extended_slots_completed": 0,
-          "auto_deduction_slots": 0,
+          "planned_bars_completed": 3,
+          "early_bars_completed": 1,
+          "extended_bars_completed": 0,
+          "auto_deduction_bars": 0,
           "tokens": 35
         }
       },
       {
         "id": "tokens-04",
-        "desc": "Early by 2 slots",
+        "desc": "Early by 2 bars",
         "input": {
           "original_start": "2026-11-02T14:00:00+08:00",
           "original_end": "2026-11-02T15:00:00+08:00",
@@ -612,16 +625,16 @@
           "finish_kind": "on_time"
         },
         "expected": {
-          "planned_slots_completed": 3,
-          "early_slots_completed": 2,
-          "extended_slots_completed": 0,
-          "auto_deduction_slots": 0,
+          "planned_bars_completed": 3,
+          "early_bars_completed": 2,
+          "extended_bars_completed": 0,
+          "auto_deduction_bars": 0,
           "tokens": 40
         }
       },
       {
         "id": "tokens-05",
-        "desc": "Shortened by 1 slot: proportional",
+        "desc": "Shortened by 1 bar: proportional",
         "input": {
           "original_start": "2026-11-02T14:00:00+08:00",
           "original_end": "2026-11-02T15:00:00+08:00",
@@ -630,16 +643,16 @@
           "finish_kind": "shortened"
         },
         "expected": {
-          "planned_slots_completed": 2,
-          "early_slots_completed": 0,
-          "extended_slots_completed": 0,
-          "auto_deduction_slots": 0,
+          "planned_bars_completed": 2,
+          "early_bars_completed": 0,
+          "extended_bars_completed": 0,
+          "auto_deduction_bars": 0,
           "tokens": 20
         }
       },
       {
         "id": "tokens-06",
-        "desc": "Extended by 1 slot and completed: +50%",
+        "desc": "Extended by 1 bar and completed: +50%",
         "input": {
           "original_start": "2026-11-02T14:00:00+08:00",
           "original_end": "2026-11-02T15:00:00+08:00",
@@ -648,10 +661,10 @@
           "finish_kind": "on_time"
         },
         "expected": {
-          "planned_slots_completed": 3,
-          "early_slots_completed": 0,
-          "extended_slots_completed": 1,
-          "auto_deduction_slots": 0,
+          "planned_bars_completed": 3,
+          "early_bars_completed": 0,
+          "extended_bars_completed": 1,
+          "auto_deduction_bars": 0,
           "tokens": 35
         }
       },
@@ -666,16 +679,16 @@
           "finish_kind": "shortened"
         },
         "expected": {
-          "planned_slots_completed": 3,
-          "early_slots_completed": 0,
-          "extended_slots_completed": 1,
-          "auto_deduction_slots": 0,
+          "planned_bars_completed": 3,
+          "early_bars_completed": 0,
+          "extended_bars_completed": 1,
+          "auto_deduction_bars": 0,
           "tokens": 35
         }
       },
       {
         "id": "tokens-08",
-        "desc": "Auto-finish: one slot deducted",
+        "desc": "Auto-finish: one bar deducted",
         "input": {
           "original_start": "2026-11-02T14:00:00+08:00",
           "original_end": "2026-11-02T15:00:00+08:00",
@@ -684,10 +697,10 @@
           "finish_kind": "auto"
         },
         "expected": {
-          "planned_slots_completed": 3,
-          "early_slots_completed": 0,
-          "extended_slots_completed": 0,
-          "auto_deduction_slots": 1,
+          "planned_bars_completed": 3,
+          "early_bars_completed": 0,
+          "extended_bars_completed": 0,
+          "auto_deduction_bars": 1,
           "tokens": 20
         }
       },
@@ -702,10 +715,10 @@
           "finish_kind": "auto"
         },
         "expected": {
-          "planned_slots_completed": 3,
-          "early_slots_completed": 0,
-          "extended_slots_completed": 1,
-          "auto_deduction_slots": 1,
+          "planned_bars_completed": 3,
+          "early_bars_completed": 0,
+          "extended_bars_completed": 1,
+          "auto_deduction_bars": 1,
           "tokens": 25
         }
       },
@@ -720,10 +733,10 @@
           "finish_kind": "auto"
         },
         "expected": {
-          "planned_slots_completed": 2,
-          "early_slots_completed": 0,
-          "extended_slots_completed": 0,
-          "auto_deduction_slots": 1,
+          "planned_bars_completed": 2,
+          "early_bars_completed": 0,
+          "extended_bars_completed": 0,
+          "auto_deduction_bars": 1,
           "tokens": 10
         }
       },
@@ -738,10 +751,10 @@
           "finish_kind": "auto"
         },
         "expected": {
-          "planned_slots_completed": 1,
-          "early_slots_completed": 0,
-          "extended_slots_completed": 0,
-          "auto_deduction_slots": 1,
+          "planned_bars_completed": 1,
+          "early_bars_completed": 0,
+          "extended_bars_completed": 0,
+          "auto_deduction_bars": 1,
           "tokens": 0
         }
       },
@@ -756,10 +769,10 @@
           "finish_kind": "shortened"
         },
         "expected": {
-          "planned_slots_completed": 0,
-          "early_slots_completed": 1,
-          "extended_slots_completed": 0,
-          "auto_deduction_slots": 0,
+          "planned_bars_completed": 0,
+          "early_bars_completed": 1,
+          "extended_bars_completed": 0,
+          "auto_deduction_bars": 0,
           "tokens": 5
         }
       },
@@ -774,10 +787,10 @@
           "finish_kind": "on_time"
         },
         "expected": {
-          "planned_slots_completed": 3,
-          "early_slots_completed": 1,
-          "extended_slots_completed": 1,
-          "auto_deduction_slots": 0,
+          "planned_bars_completed": 3,
+          "early_bars_completed": 1,
+          "extended_bars_completed": 1,
+          "auto_deduction_bars": 0,
           "tokens": 40
         }
       },
@@ -792,10 +805,10 @@
           "finish_kind": "abandoned"
         },
         "expected": {
-          "planned_slots_completed": 0,
-          "early_slots_completed": 0,
-          "extended_slots_completed": 0,
-          "auto_deduction_slots": 0,
+          "planned_bars_completed": 0,
+          "early_bars_completed": 0,
+          "extended_bars_completed": 0,
+          "auto_deduction_bars": 0,
           "tokens": 0
         }
       },
@@ -810,10 +823,10 @@
           "finish_kind": "missed"
         },
         "expected": {
-          "planned_slots_completed": 0,
-          "early_slots_completed": 0,
-          "extended_slots_completed": 0,
-          "auto_deduction_slots": 0,
+          "planned_bars_completed": 0,
+          "early_bars_completed": 0,
+          "extended_bars_completed": 0,
+          "auto_deduction_bars": 0,
           "tokens": 0
         }
       }
@@ -826,25 +839,28 @@
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "in_progress"
             },
             {
               "id": "B",
+              "kind": "cadenza",
               "start": "2026-11-02T15:00:00+08:00",
               "end": "2026-11-02T15:40:00+08:00",
               "status": "planned"
             },
             {
               "id": "C",
+              "kind": "cadenza",
               "start": "2026-11-02T16:00:00+08:00",
               "end": "2026-11-02T16:20:00+08:00",
               "status": "planned"
             }
           ],
           "event_id": "A",
-          "slots": 1,
+          "bars": 1,
           "now": "2026-11-02T14:30:00+08:00",
           "timezone": "Asia/Shanghai",
           "day_end_local_time": "00:00"
@@ -869,25 +885,28 @@
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "in_progress"
             },
             {
               "id": "B",
+              "kind": "cadenza",
               "start": "2026-11-02T15:00:00+08:00",
               "end": "2026-11-02T15:40:00+08:00",
               "status": "planned"
             },
             {
               "id": "C",
+              "kind": "cadenza",
               "start": "2026-11-02T15:40:00+08:00",
               "end": "2026-11-02T16:20:00+08:00",
               "status": "planned"
             }
           ],
           "event_id": "A",
-          "slots": 1,
+          "bars": 1,
           "now": "2026-11-02T14:30:00+08:00",
           "timezone": "Asia/Shanghai",
           "day_end_local_time": "00:00"
@@ -912,24 +931,26 @@
       },
       {
         "id": "extend-03",
-        "desc": "A gap absorbs a 1-slot extension: nothing moves",
+        "desc": "A gap absorbs a 1-bar extension: nothing moves",
         "input": {
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "in_progress"
             },
             {
               "id": "B",
+              "kind": "cadenza",
               "start": "2026-11-02T15:20:00+08:00",
               "end": "2026-11-02T16:00:00+08:00",
               "status": "planned"
             }
           ],
           "event_id": "A",
-          "slots": 1,
+          "bars": 1,
           "now": "2026-11-02T14:30:00+08:00",
           "timezone": "Asia/Shanghai",
           "day_end_local_time": "00:00"
@@ -943,24 +964,26 @@
       },
       {
         "id": "extend-04",
-        "desc": "Moved events shift by the full extension, not the minimum",
+        "desc": "A gap is used up first: the next Cadenza moves only as far as needed",
         "input": {
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "in_progress"
             },
             {
               "id": "B",
+              "kind": "cadenza",
               "start": "2026-11-02T15:20:00+08:00",
               "end": "2026-11-02T16:00:00+08:00",
               "status": "planned"
             }
           ],
           "event_id": "A",
-          "slots": 2,
+          "bars": 2,
           "now": "2026-11-02T14:30:00+08:00",
           "timezone": "Asia/Shanghai",
           "day_end_local_time": "00:00"
@@ -971,8 +994,8 @@
           "moved": [
             {
               "id": "B",
-              "start": "2026-11-02T16:00:00+08:00",
-              "end": "2026-11-02T16:40:00+08:00"
+              "start": "2026-11-02T15:40:00+08:00",
+              "end": "2026-11-02T16:20:00+08:00"
             }
           ],
           "day_end_warnings": []
@@ -980,30 +1003,40 @@
       },
       {
         "id": "extend-05",
-        "desc": "An overlapping event that started earlier is not moved",
+        "desc": "Tuttis are never moved",
         "input": {
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "in_progress"
             },
             {
               "id": "P",
+              "kind": "tutti",
               "start": "2026-11-02T14:20:00+08:00",
               "end": "2026-11-02T16:00:00+08:00",
               "status": "planned"
             },
             {
+              "id": "T",
+              "kind": "tutti",
+              "start": "2026-11-02T15:00:00+08:00",
+              "end": "2026-11-02T15:20:00+08:00",
+              "status": "planned"
+            },
+            {
               "id": "B",
+              "kind": "cadenza",
               "start": "2026-11-02T15:00:00+08:00",
               "end": "2026-11-02T15:20:00+08:00",
               "status": "planned"
             }
           ],
           "event_id": "A",
-          "slots": 1,
+          "bars": 1,
           "now": "2026-11-02T14:30:00+08:00",
           "timezone": "Asia/Shanghai",
           "day_end_local_time": "00:00"
@@ -1028,25 +1061,28 @@
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "in_progress"
             },
             {
               "id": "B",
+              "kind": "cadenza",
               "start": "2026-11-02T15:00:00+08:00",
               "end": "2026-11-02T15:20:00+08:00",
               "status": "cancelled"
             },
             {
               "id": "C",
+              "kind": "cadenza",
               "start": "2026-11-02T15:00:00+08:00",
               "end": "2026-11-02T15:40:00+08:00",
               "status": "missed"
             }
           ],
           "event_id": "A",
-          "slots": 1,
+          "bars": 1,
           "now": "2026-11-02T14:30:00+08:00",
           "timezone": "Asia/Shanghai",
           "day_end_local_time": "00:00"
@@ -1065,19 +1101,21 @@
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "in_progress"
             },
             {
               "id": "C",
+              "kind": "cadenza",
               "start": "2026-11-02T15:00:00+08:00",
               "end": "2026-11-02T15:20:00+08:00",
               "status": "in_progress"
             }
           ],
           "event_id": "A",
-          "slots": 1,
+          "bars": 1,
           "now": "2026-11-02T15:01:00+08:00",
           "timezone": "Asia/Shanghai",
           "day_end_local_time": "00:00"
@@ -1097,13 +1135,14 @@
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "in_progress"
             }
           ],
           "event_id": "A",
-          "slots": 1,
+          "bars": 1,
           "now": "2026-11-02T15:05:00+08:00",
           "timezone": "Asia/Shanghai",
           "day_end_local_time": "00:00"
@@ -1122,13 +1161,14 @@
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "in_progress"
             }
           ],
           "event_id": "A",
-          "slots": 1,
+          "bars": 1,
           "now": "2026-11-02T15:05:01+08:00",
           "timezone": "Asia/Shanghai",
           "day_end_local_time": "00:00"
@@ -1140,25 +1180,26 @@
       },
       {
         "id": "extend-10",
-        "desc": "Zero slots is invalid",
+        "desc": "Zero bars is invalid",
         "input": {
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "in_progress"
             }
           ],
           "event_id": "A",
-          "slots": 0,
+          "bars": 0,
           "now": "2026-11-02T14:30:00+08:00",
           "timezone": "Asia/Shanghai",
           "day_end_local_time": "00:00"
         },
         "expected": {
           "ok": false,
-          "error": "invalid_slots"
+          "error": "invalid_bars"
         }
       },
       {
@@ -1168,13 +1209,14 @@
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "planned"
             }
           ],
           "event_id": "A",
-          "slots": 1,
+          "bars": 1,
           "now": "2026-11-02T14:30:00+08:00",
           "timezone": "Asia/Shanghai",
           "day_end_local_time": "00:00"
@@ -1191,19 +1233,21 @@
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T22:00:00+08:00",
               "end": "2026-11-02T23:00:00+08:00",
               "status": "in_progress"
             },
             {
               "id": "B",
+              "kind": "cadenza",
               "start": "2026-11-02T23:00:00+08:00",
               "end": "2026-11-02T23:40:00+08:00",
               "status": "planned"
             }
           ],
           "event_id": "A",
-          "slots": 1,
+          "bars": 1,
           "now": "2026-11-02T22:30:00+08:00",
           "timezone": "Asia/Shanghai",
           "day_end_local_time": "00:00"
@@ -1228,19 +1272,21 @@
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T22:00:00+08:00",
               "end": "2026-11-02T23:00:00+08:00",
               "status": "in_progress"
             },
             {
               "id": "B",
+              "kind": "cadenza",
               "start": "2026-11-02T23:00:00+08:00",
               "end": "2026-11-02T23:40:00+08:00",
               "status": "planned"
             }
           ],
           "event_id": "A",
-          "slots": 2,
+          "bars": 2,
           "now": "2026-11-02T22:30:00+08:00",
           "timezone": "Asia/Shanghai",
           "day_end_local_time": "00:00"
@@ -1267,19 +1313,21 @@
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T22:00:00+08:00",
               "end": "2026-11-02T23:00:00+08:00",
               "status": "in_progress"
             },
             {
               "id": "B",
+              "kind": "cadenza",
               "start": "2026-11-02T23:00:00+08:00",
               "end": "2026-11-02T23:40:00+08:00",
               "status": "planned"
             }
           ],
           "event_id": "A",
-          "slots": 2,
+          "bars": 2,
           "now": "2026-11-02T22:30:00+08:00",
           "timezone": "Asia/Shanghai",
           "day_end_local_time": "02:00"
@@ -1304,13 +1352,14 @@
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T23:00:00+08:00",
               "end": "2026-11-02T23:40:00+08:00",
               "status": "in_progress"
             }
           ],
           "event_id": "A",
-          "slots": 2,
+          "bars": 2,
           "now": "2026-11-02T23:10:00+08:00",
           "timezone": "Asia/Shanghai",
           "day_end_local_time": "00:00"
@@ -1323,36 +1372,120 @@
             "A"
           ]
         }
+      },
+      {
+        "id": "extend-16",
+        "desc": "Minimal shifts through gaps: each Cadenza moves only as far as needed",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "kind": "cadenza",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "in_progress"
+            },
+            {
+              "id": "B",
+              "kind": "cadenza",
+              "start": "2026-11-02T15:20:00+08:00",
+              "end": "2026-11-02T16:00:00+08:00",
+              "status": "planned"
+            },
+            {
+              "id": "C",
+              "kind": "cadenza",
+              "start": "2026-11-02T16:20:00+08:00",
+              "end": "2026-11-02T16:40:00+08:00",
+              "status": "planned"
+            },
+            {
+              "id": "D",
+              "kind": "cadenza",
+              "start": "2026-11-02T17:20:00+08:00",
+              "end": "2026-11-02T17:40:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "event_id": "A",
+          "bars": 3,
+          "now": "2026-11-02T14:30:00+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "00:00"
+        },
+        "expected": {
+          "ok": true,
+          "new_end": "2026-11-02T16:00:00+08:00",
+          "moved": [
+            {
+              "id": "B",
+              "start": "2026-11-02T16:00:00+08:00",
+              "end": "2026-11-02T16:40:00+08:00"
+            },
+            {
+              "id": "C",
+              "start": "2026-11-02T16:40:00+08:00",
+              "end": "2026-11-02T17:00:00+08:00"
+            }
+          ],
+          "day_end_warnings": []
+        }
+      },
+      {
+        "id": "extend-17",
+        "desc": "A Tutti can't be extended",
+        "input": {
+          "calendar": [
+            {
+              "id": "T",
+              "kind": "tutti",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "event_id": "T",
+          "bars": 1,
+          "now": "2026-11-02T14:30:00+08:00",
+          "timezone": "Asia/Shanghai",
+          "day_end_local_time": "00:00"
+        },
+        "expected": {
+          "ok": false,
+          "error": "not_cadenza"
+        }
       }
     ],
     "create": [
       {
         "id": "create-01",
-        "desc": "Third overlapping event is rejected",
+        "desc": "A Cadenza overlapping another Cadenza is rejected",
         "input": {
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "planned"
             },
             {
               "id": "B",
+              "kind": "tutti",
               "start": "2026-11-02T14:20:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "planned"
             }
           ],
+          "kind": "cadenza",
           "start": "2026-11-02T14:40:00+08:00",
           "end": "2026-11-02T15:20:00+08:00"
         },
         "expected": {
           "ok": false,
-          "error": "overlap_limit",
+          "error": "cadenza_overlap",
           "conflicts": [
-            "A",
-            "B"
+            "A"
           ]
         }
       },
@@ -1363,17 +1496,13 @@
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
-              "end": "2026-11-02T15:00:00+08:00",
-              "status": "planned"
-            },
-            {
-              "id": "B",
-              "start": "2026-11-02T14:20:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "planned"
             }
           ],
+          "kind": "cadenza",
           "start": "2026-11-02T15:00:00+08:00",
           "end": "2026-11-02T15:20:00+08:00"
         },
@@ -1383,24 +1512,27 @@
       },
       {
         "id": "create-03",
-        "desc": "Overlapping only one of two events is fine",
+        "desc": "A Cadenza may overlap Tuttis",
         "input": {
           "calendar": [
             {
               "id": "A",
+              "kind": "tutti",
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "planned"
             },
             {
               "id": "B",
+              "kind": "tutti",
               "start": "2026-11-02T14:20:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "planned"
             }
           ],
-          "start": "2026-11-02T13:40:00+08:00",
-          "end": "2026-11-02T14:20:00+08:00"
+          "kind": "cadenza",
+          "start": "2026-11-02T14:40:00+08:00",
+          "end": "2026-11-02T15:20:00+08:00"
         },
         "expected": {
           "ok": true
@@ -1408,18 +1540,34 @@
       },
       {
         "id": "create-04",
-        "desc": "Second overlapping event is fine",
+        "desc": "Tuttis overlap without limit",
         "input": {
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "planned"
+            },
+            {
+              "id": "B",
+              "kind": "tutti",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "planned"
+            },
+            {
+              "id": "C",
+              "kind": "tutti",
+              "start": "2026-11-02T14:20:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "planned"
             }
           ],
-          "start": "2026-11-02T14:20:00+08:00",
-          "end": "2026-11-02T14:40:00+08:00"
+          "kind": "tutti",
+          "start": "2026-11-02T14:40:00+08:00",
+          "end": "2026-11-02T15:20:00+08:00"
         },
         "expected": {
           "ok": true
@@ -1427,24 +1575,27 @@
       },
       {
         "id": "create-05",
-        "desc": "Cancelled events don't count",
+        "desc": "Cancelled and missed Cadenzas don't count",
         "input": {
           "calendar": [
             {
               "id": "A",
+              "kind": "cadenza",
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
-              "status": "planned"
+              "status": "cancelled"
             },
             {
               "id": "B",
+              "kind": "cadenza",
               "start": "2026-11-02T14:20:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
-              "status": "cancelled"
+              "status": "missed"
             }
           ],
-          "start": "2026-11-02T14:40:00+08:00",
-          "end": "2026-11-02T15:20:00+08:00"
+          "kind": "cadenza",
+          "start": "2026-11-02T14:20:00+08:00",
+          "end": "2026-11-02T14:40:00+08:00"
         },
         "expected": {
           "ok": true
@@ -1455,19 +1606,21 @@
         "desc": "Start must be on a grid mark",
         "input": {
           "calendar": [],
+          "kind": "cadenza",
           "start": "2026-11-02T14:10:00+08:00",
           "end": "2026-11-02T14:30:00+08:00"
         },
         "expected": {
           "ok": false,
-          "error": "slot_misaligned"
+          "error": "bar_misaligned"
         }
       },
       {
         "id": "create-07",
-        "desc": "Duration must be whole slots",
+        "desc": "Duration must be whole bars",
         "input": {
           "calendar": [],
+          "kind": "cadenza",
           "start": "2026-11-02T14:00:00+08:00",
           "end": "2026-11-02T14:30:00+08:00"
         },
@@ -1481,12 +1634,96 @@
         "desc": "Zero duration is invalid",
         "input": {
           "calendar": [],
+          "kind": "cadenza",
           "start": "2026-11-02T14:00:00+08:00",
           "end": "2026-11-02T14:00:00+08:00"
         },
         "expected": {
           "ok": false,
           "error": "invalid_duration"
+        }
+      },
+      {
+        "id": "create-09",
+        "desc": "Tuttis use the grid too",
+        "input": {
+          "calendar": [],
+          "kind": "tutti",
+          "start": "2026-11-02T14:10:00+08:00",
+          "end": "2026-11-02T14:30:00+08:00"
+        },
+        "expected": {
+          "ok": false,
+          "error": "bar_misaligned"
+        }
+      },
+      {
+        "id": "create-10",
+        "desc": "Switching a Tutti to a Cadenza is checked against other Cadenzas",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "kind": "cadenza",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "planned"
+            },
+            {
+              "id": "T",
+              "kind": "tutti",
+              "start": "2026-11-02T14:20:00+08:00",
+              "end": "2026-11-02T14:40:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "event_id": "T",
+          "kind": "cadenza",
+          "start": "2026-11-02T14:20:00+08:00",
+          "end": "2026-11-02T14:40:00+08:00"
+        },
+        "expected": {
+          "ok": false,
+          "error": "cadenza_overlap",
+          "conflicts": [
+            "A"
+          ]
+        }
+      },
+      {
+        "id": "create-11",
+        "desc": "Switching a Cadenza to a Tutti is not checked for overlap",
+        "input": {
+          "calendar": [
+            {
+              "id": "A",
+              "kind": "cadenza",
+              "start": "2026-11-02T13:00:00+08:00",
+              "end": "2026-11-02T14:00:00+08:00",
+              "status": "planned"
+            },
+            {
+              "id": "X",
+              "kind": "cadenza",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T14:40:00+08:00",
+              "status": "planned"
+            },
+            {
+              "id": "T",
+              "kind": "tutti",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "event_id": "X",
+          "kind": "tutti",
+          "start": "2026-11-02T13:40:00+08:00",
+          "end": "2026-11-02T14:20:00+08:00"
+        },
+        "expected": {
+          "ok": true
         }
       }
     ],
