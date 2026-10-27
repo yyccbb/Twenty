@@ -15,8 +15,8 @@
   },
   "conventions": [
     "Times are ISO 8601 with offset; compare instants, not strings. Grid math runs in UTC (whole-hour zones only).",
-    "snap(t) = the grid mark g with g - 15 min < t <= g + 5 min (start taps).",
-    "finish_snap(t) = the grid mark g with g - 5 min < t <= g + 15 min (finish taps), so on time is (planned_end - 5 min, planned_end + 5 min].",
+    "snap(t) = the grid mark g with g - 15 min < t <= g + 5 min, for start and finish taps alike.",
+    "One exception at the planned end E: a finish is on time only in (E - 5 min, E + 5 min]. A finish tap in (E - 15 min, E - 5 min], which snap() would put at E, records E - 20 min instead (the last bar is lost).",
     "Event intervals are half-open [start, end): an event ending at 15:00 does not overlap one starting at 15:00.",
     "Calendar entries carry kind: cadenza or tutti. Only Cadenzas are timed, so snap, start, finish and tokens cases always describe a Cadenza.",
     "A Cadenza may not overlap another Cadenza. Tuttis may overlap anything, without limit.",
@@ -476,7 +476,7 @@
         "input": {
           "recorded_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
-          "tapped_at": "2026-11-02T14:35:01+08:00"
+          "tapped_at": "2026-11-02T14:25:01+08:00"
         },
         "expected": {
           "finish_kind": "shortened",
@@ -489,7 +489,7 @@
         "input": {
           "recorded_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
-          "tapped_at": "2026-11-02T14:35:00+08:00"
+          "tapped_at": "2026-11-02T14:25:00+08:00"
         },
         "expected": {
           "finish_kind": "shortened",
@@ -502,7 +502,7 @@
         "input": {
           "recorded_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
-          "tapped_at": "2026-11-02T14:15:01+08:00"
+          "tapped_at": "2026-11-02T14:05:01+08:00"
         },
         "expected": {
           "finish_kind": "shortened",
@@ -515,7 +515,7 @@
         "input": {
           "recorded_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
-          "tapped_at": "2026-11-02T14:15:00+08:00"
+          "tapped_at": "2026-11-02T14:05:00+08:00"
         },
         "expected": {
           "finish_kind": "abandoned"
