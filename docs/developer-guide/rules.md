@@ -2,7 +2,7 @@
 
 The timing, token, overlap and cue rules that every part of Twenty follows. The backend's `src/rules` implements them, and its results are final. Each client keeps a port only to show results instantly ("you'll start at 14:20"). Every implementation must pass the shared test cases in [`contracts/rules/fixtures.json`](../../contracts/rules/fixtures.json).
 
-These are product decisions (§9 lists them). Never change a rule in code alone: this page, the fixtures, the backend and every client port change together.
+These are product decisions. Never change a rule in code alone: this page, the fixtures, the backend and every client port change together.
 
 **Two kinds of events.** Every event has a `kind`:
 
@@ -17,7 +17,7 @@ These are product decisions (§9 lists them). Never change a rule in code alone:
 
 The rules in §2–§5 and §7 apply to Cadenzas only.
 
-**Event states.** A Cadenza is `planned` until it starts, `in_progress` until it finishes, then `done`. One that nobody starts becomes `missed` once its planned end has passed (§3). A Tutti is only ever `planned`. There is no cancelled state: deleting an event removes it, along with its change history. Only planned events can be deleted. A Cadenza that has started, finished or been missed can't be deleted (`409 invalid_state`), because its record, and any tokens it earned, must stay.
+**Event states.** A Cadenza is `planned` until it starts, `in_progress` until it finishes, then `done` (an auto-finished Cadenza is `done` with `finish_kind: auto`, §4). One that nobody starts becomes `missed` once its planned end has passed (§3). A Tutti is only ever `planned`. There is no cancelled state: deleting an event removes it, along with its change history. Only planned events can be deleted. A Cadenza that has started, finished or been missed can't be deleted (`409 invalid_state`), because its record, and any tokens it earned, must stay.
 
 ## 1. The 20-minute grid and time zones
 
@@ -70,7 +70,7 @@ The 5-minute grace applies everywhere. There is **one exception, at the planned 
 | 14:25:01–14:45 | 14:40 | Late by 2 bars |
 | after 14:45 | 15:00 = end | **Missed** |
 
-An early start is also **rejected** if the longer block would **overlap another Cadenza** (§6). Tuttis don't matter. The app then asks the user to move things first.
+An early start is also **rejected** if the longer block would **overlap another Cadenza** (§6), for example one planned just before it that hasn't been started yet.
 
 A Cadenza that nobody starts is marked **missed** once its planned end has passed (the backend's `events.close_stale` job, every 20 minutes; Tuttis are left alone). It earns nothing and costs nothing (§7).
 
@@ -81,13 +81,13 @@ A Cadenza that nobody starts is marked **missed** once its planned end has passe
 | When the user acts on A's prompt | What happens |
 |---|---|
 | Finish tap in `(E − 5, E)` | A finishes on time. B's start prompt appears at `E` as usual. |
-| Tap in `[E, E + 5]` | The prompt reads **"Finish A and start B"**. One tap finishes A (on time) and starts B (on time). iOS sends A's finish, then B's start, with the same `tapped_at`. |
+| Tap in `[E, E + 5]` | The prompt reads **"Finish A and start B"**. One tap finishes A (on time) and starts B (on time). The frontend sends A's finish, then B's start, with the same `tapped_at`. |
 | Extend | A is extended and B is pushed (§5). |
 | Nothing by `E + 5` | A is **auto-finished** (one bar deducted, §4). B's start window `(E − 15, E + 5]` has closed, so B is **late by at least 1 bar**. |
 
 ## 4. Finishing a Cadenza
 
-`E` is the Cadenza's current planned end (after any extension). At `E − 5 min`, when the on-time window `(E − 5, E + 5]` opens, iOS shows a **"Finish or extend?"** prompt. It stays up until `E + 5`.
+`E` is the Cadenza's current planned end (after any extension). At `E − 5 min`, when the on-time window `(E − 5, E + 5]` opens, the frontend shows a **"Finish or extend?"** prompt. It stays up until `E + 5`.
 
 | What happens | Recorded end | Result |
 |---|---|---|
@@ -107,7 +107,7 @@ A Cadenza that nobody starts is marked **missed** once its planned end has passe
 **Auto-finish and late-arriving taps.** At `E + 5` the "Finish or extend?" prompt goes away, so the user can't tap finish or extend any more.
 
 1. **At `E + 5` the server auto-finishes.** A delayed background job (pg-boss `startAfter`, rescheduled whenever `E` changes) marks the Cadenza done with `finish_kind: auto` and pays the reward with one bar deducted straight away. No tap is involved.
-2. **A finish tap made by `E + 5` that arrives later replaces it, once.** If the device was offline, its queued finish tap (`tapped_at ≤ E + 5`) is sent at the next contact with the server. The server then recomputes the finish from that tap as if it had arrived in time, and writes the difference as a ledger `adjustment`. The difference can go either way: an on-time tap gives back the deducted bar, and an early tap can pay less than the auto-finish did. iOS tells the user (e.g. "Your 14:58 finish synced: +10 tokens").
+2. **A finish tap made by `E + 5` that arrives later replaces it, once.** If the device was offline, its queued finish tap (`tapped_at ≤ E + 5`) is sent at the next contact with the server. The server then recomputes the finish from that tap as if it had arrived in time, and writes the difference as a ledger `adjustment`. The difference can go either way: an on-time tap gives back the deducted bar, and an early tap can pay less than the auto-finish did. The frontend tells the user (e.g. "Your 14:58 finish synced: +10 tokens").
 3. **Everything else is rejected:**
    - a finish tap with `tapped_at` after `E + 5`: `409 window_closed`. The UI can't produce one, so it's a client bug or a wrong device clock;
    - a second finish tap, or one for a Cadenza finished by a tap: `409 invalid_state`;
@@ -116,7 +116,7 @@ A Cadenza that nobody starts is marked **missed** once its planned end has passe
 5. **Back-to-back Cadenzas.** An offline "Finish A and start B" queues A's finish, then B's start, with the same `tapped_at`, and they are sent in that order. A's late finish replaces its auto-finish, then B's start succeeds because A is finished. B is only marked missed after its planned end passes.
 6. **Trust.** Tap times come from the device. They are bounded by the usual checks (§2: no more than 2 minutes in the future, no older than 24 h). That's accepted for the MVP; shortening the window in which a late tap can replace an auto-finish is the lever if it gets abused.
 
-On the device, iOS also marks the Cadenza auto-finished locally at `E + 5`. If a finish tap is still queued, it shows "Finish pending sync" instead of the deduction. A tap on a notification's action button records its time at the moment of the tap, even if the app isn't open.
+On the device, the frontend also marks the Cadenza auto-finished locally at `E + 5`. If a finish tap is still queued, it shows "Finish pending sync" instead of the deduction. A tap on a notification's action button records its time at the moment of the tap, even if the app isn't open.
 
 ## 5. Extending a Cadenza
 
@@ -126,7 +126,7 @@ On the device, iOS also marks the Cadenza auto-finished locally at `E + 5`. If a
   1. Go through the later Cadenzas in start order, starting from the end `edge = E_new`.
   2. If a Cadenza starts before `edge`, shift it so it **starts exactly at `edge`**, keeping its duration. This is the smallest shift that clears the overlap, so any gap before it is used up first. Its new end becomes the new `edge`, and the next Cadenza is checked against it.
   3. Stop at the first Cadenza that starts at or after `edge`; nothing after it moves.
-  4. Everything happens in **one transaction**. The response lists every moved Cadenza so iOS can reschedule their notifications. The app shows a **preview** first (`dry_run`).
+  4. Everything happens in **one transaction**. The response lists every moved Cadenza so the frontend can reschedule their notifications. The app shows a **preview** first (`dry_run`).
   5. A pushed Cadenza is always still planned: no other Cadenza can be started while this one is in progress (§3), and every later one ends after it. So a cascade never moves a started or finished Cadenza.
 
   Example: A runs 14:00–15:00, B 15:20–16:00, C 16:20–16:40. Extending A by 3 bars to 16:00 pushes B to 16:00–16:40; B now runs into C, so C is pushed to 16:40–17:00.
@@ -173,7 +173,7 @@ tokens = max(tokens, 0)
 
 ## 8. Cues
 
-A **cue** is a reminder, a separate kind of item: a title and a time, **no duration, no start/finish, no tokens**. iOS fires a local notification at that time; the user can mark an occurrence done, skip it or snooze it.
+A **cue** is a reminder, a separate kind of item: a title and a time, **no duration, no start/finish, no tokens**. The frontend fires a local notification at that time; the user can mark an occurrence done, skip it or snooze it.
 
 - **Any minute** is allowed, not just grid marks.
 - **Full calendar-style repeat rules**, stored as an RFC 5545 `RRULE` string (the iCalendar standard Apple Calendar and Google Calendar use), e.g. `FREQ=MONTHLY;BYDAY=2TU` = every 2nd Tuesday. Rules are expanded with the `rrule` npm library on the server.
@@ -183,31 +183,4 @@ A **cue** is a reminder, a separate kind of item: a title and a time, **no durat
   - **This and following:** the series is **split**. The old rule gets an `UNTIL` just before the chosen occurrence, and a new cue starts there with the edited fields. Both share a `series_id` so the app can show them as one series. Overrides after the split point move to the new cue.
   - **All occurrences:** edit the rule in place and keep overrides whose original time still exists in the new rule.
 - Cues are never pushed by cascades and don't count toward the overlap rule.
-- **Clients don't expand repeat rules.** `GET /v1/calendar` returns the expanded occurrences, so iOS needs no repeat-rule engine of its own. It schedules notifications from those occurrences in a rolling window ([iOS guide §4](frontend/ios/README.md#4-local-notifications)).
-
-## 9. Decisions
-
-All closed. Each row is a product decision; the sections above have the detail.
-
-| # | Decision | Where |
-|---|---|---|
-| Q1 | Backend language: **TypeScript (Node + Hono)** | [backend guide §2](backend.md#2-stack) |
-| Q2 | Early start allowed **up to 2 bars**, using the shared snapping window | §2, §3 |
-| Q3 | Extend any time or from the end prompt; extensions push later **Cadenzas** by the **smallest shift** that clears each overlap (gaps are used up first); Tuttis never move; finishing early is an inferred shorten that moves nothing | §4, §5 |
-| Q4 | Offline taps are queued; server accepts device time within 24 h if the clock looks sane | §2 |
-| Q5 | Append-only ledger + versioned reward rules | §7 |
-| Q6 | **Grace is 5 min everywhere**; one snapping window per mark: 15 min before to 5 min after. Exception at the planned end: a finish is on time only in `(E − 5, E + 5]`; a tap in `(E − 15, E − 5]` loses the last bar | §2, §4 |
-| Q7 | No action by `E + 5` → **auto-finish, one bar of reward deducted** | §4 |
-| Q8 | Rewards: on time = full; shortened or late = proportional; early and extended bars = **50% each** | §7 |
-| Q9 | A Cadenza never overlaps another Cadenza; Tuttis overlap without limit | §6 |
-| Q10 | Pushes past a **user-set day end** are allowed with a warning | §5 |
-| Q11 | Cues: **any minute**, **full RRULE repeats** | §8 |
-| Q12 | Only **whole-hour time zones** for now; others listed as out of scope | §1 |
-| Q13 | Late start loses only the missed bars' reward, **no extra penalty** | §7 |
-| Q14 | Missed (never started) events **cost nothing** | §7 |
-| Q15 | Repeating cues support **this / this and following / all** edits | §8 |
-| Q16 | Two kinds of events: **Cadenza** (timed, rewarded) and **Tutti** (ordinary). Both use the grid; only Cadenzas earn tokens; planned events can switch kind | Top of page, §6 |
-| Q17 | Names: a 20-minute unit is a **bar**; a reminder is a **cue** | §1, §8 |
-| Q18 | **Email + password** sign-up/sign-in alongside Sign in with Apple. MVP checks the email's format only (no verification email, no password reset yet); passwords 8–128 chars. Email and Apple accounts stay **separate**, even when the addresses match | [frontend guide §3](frontend/README.md#3-auth) |
-| Q19 | **One Cadenza in progress at a time**: the next can't start until the current one finishes. Back-to-back Cadenzas share a "Finish A and start B" prompt in `[E, E + 5]` | §3 |
-| Q20 | Auto-finish happens on the server at `E + 5` with no tap. A finish tap made by `E + 5` that arrives later (offline) **replaces it once**, corrected in the ledger; taps after `E + 5` are rejected | §4 |
+- **Clients don't expand repeat rules.** `GET /v1/calendar` returns the expanded occurrences, so the frontend needs no repeat-rule engine of its own. It schedules notifications from those occurrences in a rolling window ([local notifications](frontend/ios/README.md#4-local-notifications)).

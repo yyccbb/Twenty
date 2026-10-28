@@ -16,7 +16,7 @@ This folder is for the people building it. Pick your guide:
 
 | Thing | Location | Owned by |
 |---|---|---|
-| Product rules and decisions | [`rules.md`](rules.md) | Product. Decisions Q1–Q20 are closed. |
+| Product rules | [`rules.md`](rules.md) | Product |
 | Shared rules test cases | [`../../contracts/rules/fixtures.json`](../../contracts/rules/fixtures.json) | Product. Every rules implementation must pass them; nobody edits them to make a test pass. |
 | Backend code | [`Twenty-backend`](../../../Twenty-backend/README.md) (sibling repo) | Backend |
 | API contract | [`Twenty-backend/contracts/openapi.yaml`](../../../Twenty-backend/contracts/openapi.yaml) | Generated from the backend's routes and committed there. Clients generate their code from it. |
