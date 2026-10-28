@@ -2,7 +2,7 @@
 
 This applies to every Twenty client. Platform specifics are in [ios/](ios/README.md) and [web/](web/README.md).
 
-The backend's API reference is [`Twenty-backend/contracts/openapi.yaml`](../../../../Twenty-backend/contracts/openapi.yaml). A running server also serves it at `/openapi.json`. The behaviour behind the endpoints is in the [spec](../../architecture/backend-tech-stack.md), mainly §3 (rules) and §5 (API).
+The backend's API reference is [`Twenty-backend/contracts/openapi.yaml`](../../../../Twenty-backend/contracts/openapi.yaml). A running server also serves it at `/openapi.json`, and [backend guide §7](../backend.md#7-api) lists every endpoint on one page. The rules behind the endpoints (grid, start/finish, extend, overlap, tokens, cues) are in [rules.md](../rules.md); this guide covers how a client uses the API.
 
 ## 1. The client's job
 
@@ -23,11 +23,26 @@ The backend's API reference is [`Twenty-backend/contracts/openapi.yaml`](../../.
 
 ## 3. Auth
 
+There are two ways to sign in. Both return the same session: `access_token`, `expires_in`, `refresh_token` and `refresh_expires_at`.
+
+**Sign in with Apple**
+
 1. Run Sign in with Apple on the device and get the ID token.
 2. `POST /v1/auth/apple` with `{ id_token, nonce, display_name?, timezone?, device_label? }`.
    - `nonce` is the **raw** nonce. Apple receives its SHA-256 hash (the iOS convention). The server accepts either form.
    - Send `timezone` (IANA, for example `Asia/Shanghai`) on first sign-in.
-   - The response has `access_token`, `expires_in`, `refresh_token`, `refresh_expires_at` and `created` (true when the account was just made).
+   - The response also has `created` (true when the account was just made).
+
+**Email + password**
+
+1. Sign up: `POST /v1/auth/email/signup` with `{ email, password, display_name?, timezone?, device_label? }` returns `201`. If the address is in use: `409 email_taken`.
+2. Sign in: `POST /v1/auth/email/signin` with `{ email, password, device_label? }`. A wrong password and an unknown email both return `401 invalid_credentials`, so don't tell the user which one it was.
+   - The email is checked for format only. There is no verification email and no password reset yet.
+   - Passwords are 8–128 characters. Emails are stored lower-cased.
+   - Email accounts and Apple accounts are **separate**, even when the addresses match.
+
+**After sign-in** (both methods)
+
 3. Send `Authorization: Bearer <access_token>` on every `/v1` call except `/v1/auth/*`. Access tokens last **15 minutes**.
 4. On `401`, or shortly before expiry, call `POST /v1/auth/refresh` with `{ refresh_token }`. The response contains a **new** refresh token: store it and discard the old one.
 5. **Refresh from exactly one place.** Each refresh token works once. If two refreshes with the same token run at the same time, the server treats it as token theft and revokes **every** session for the account. Put refresh behind a single-flight lock, so concurrent 401s wait for one refresh.
@@ -50,12 +65,15 @@ Branch on `code`, never on `message` (messages are for logs and may change). Cod
 |---|---|---|
 | `cadenza_overlap` | 409 | A Cadenza would overlap another Cadenza. `conflicts` lists the clashing Cadenza IDs (sorted). Highlight them. |
 | `cadenza_in_progress` | 409 | Start sent while another Cadenza is still in progress. `conflicts` holds its ID. Finish it first. |
+| `email_taken` | 409 | Email sign-up with an address that already has an account. Offer sign-in instead. |
+| `invalid_credentials` | 401 | Email sign-in failed: wrong password or unknown email (deliberately not told apart). |
 | `not_cadenza` | 409 | Start, extend or finish was sent for a Tutti. Client bug: only show those actions on Cadenzas. |
 | `version_conflict` | 409 | Someone else changed this item. Refetch it, then reapply or ask the user. |
 | `bar_misaligned`, `invalid_duration`, `invalid_bars` | 422 | The client sent an off-grid start or a non-whole-bar length. That's a client bug: snap before sending. |
 | `too_early` | 422 | Start tapped more than 2 bars before the planned start. |
 | `tap_too_old`, `tap_in_future` | 422 | Offline tap older than 24 h, or the device clock is ahead by more than 2 min. Tell the user; drop the queued tap. |
-| `invalid_state` | 409 | For example, finishing an event that isn't in progress. Refetch the event. |
+| `window_closed` | 409 | Finish tapped, or extend sent, after planned end + 5 min. The UI shouldn't allow it: check the device clock and drop the queued action. |
+| `invalid_state` | 409 | The event is in the wrong state: for example finishing or extending a Cadenza that isn't in progress (or a second finish tap), deleting a Cadenza that has started, or switching the kind of one that has started. Refetch the event. |
 | `unsupported_timezone` | 422 | The zone isn't a whole number of hours from UTC (India, Nepal, …). These zones aren't supported yet. |
 | `invalid_timezone` | 422 | Not an IANA zone name. |
 | `daily_limit_reached` | 429 | AI breakdown limit for today (5 by default, counted per local day). |
@@ -74,15 +92,16 @@ Branch on `code`, never on `message` (messages are for logs and may change). Cod
 
 ## 6. Recording: start, extend, finish
 
-The heart of the app. Only **Cadenzas** are recorded; Tuttis have no start, extend or finish. Spec §3.2–§3.5 has the exact rules; in short:
+The heart of the app. Only **Cadenzas** are recorded; Tuttis have no start, extend or finish. [Rules §2–§5](../rules.md#2-snapping-one-window-per-grid-mark) has the exact rules, with worked examples; in short:
 
 - **Send the raw tap time.** `POST /v1/events/{id}/start` and `/finish` take `{ tapped_at }`: the device time of the tap. Never send a snapped or computed time. The server snaps it to the 20-minute grid.
-- **Start:** the response has `outcome` (`early` / `on_time` / `late` / `missed`), `recorded_start`, `early_bars` and `late_bars`. A late start shortens the Cadenza, because the planned end doesn't move. Reschedule the finish notification from the response.
-- **Extend:** `POST /v1/events/{id}/extend { bars, dry_run }`. Call it with `dry_run: true` first to preview. The response lists every Cadenza the cascade would push (`moved`) and any `day_end_warnings`. Each moves only as far as needed, so gaps are used up first, and Tuttis never move. Confirm with the user, then send it again with `dry_run: false`. Update every moved event locally from `moved`.
-- **One at a time:** a start fails with `cadenza_in_progress` while another Cadenza is in progress. For back-to-back Cadenzas, the end prompt of A becomes "Finish A and start B" from A's end until end + 5 min; send A's finish, then B's start, with the same `tapped_at` (spec §3.3).
-- **Finish:** the response has `finish_kind` (`on_time` / `shortened` / `abandoned` / `auto`), `recorded_end`, the token breakdown, `tokens_awarded` and the new `token_balance`.
-- **Auto-finish:** if the user does nothing by planned end + 5 min, the server finishes the Cadenza itself and deducts one bar of reward. Your next calendar refresh shows this.
-- **Offline:** queue start and finish taps with their original `tapped_at` and idempotency key, and send them in order once back online. The server accepts taps up to 24 h old.
+- **Start:** the response has `outcome` (`early` / `on_time` / `late` / `missed`), `recorded_start`, `early_bars` and `late_bars`. A late start shortens the Cadenza, because the planned end doesn't move, so the "Finish or extend?" prompt (at planned end − 5 min) doesn't move either.
+- **Extend:** only a Cadenza in progress can be extended: at any time during it, or from the "Finish or extend?" prompt until planned end + 5 min. `POST /v1/events/{id}/extend { bars, dry_run }`. It needs the server's preview, so it works online only and is never queued. Call it with `dry_run: true` first to preview. The response lists every Cadenza the cascade would push (`moved`) and any `day_end_warnings`. Each moves only as far as needed, so gaps are used up first, and Tuttis never move. Confirm with the user, then send it again with `dry_run: false`. Update every moved event locally from `moved`.
+- **One at a time:** a start fails with `cadenza_in_progress` while another Cadenza is in progress. For back-to-back Cadenzas, the end prompt of A becomes "Finish A and start B" from A's end until end + 5 min; send A's finish, then B's start, with the same `tapped_at`. If the user does nothing by A's end + 5 min, A is auto-finished and B's start is late by at least one bar ([rules §3](../rules.md#3-starting-a-cadenza)).
+- **Finish:** the response has `finish_kind` (`on_time` / `shortened` / `abandoned`), `recorded_end`, the token breakdown, `tokens_awarded` and the new `token_balance`.
+- **Auto-finish:** at planned end + 5 min the "Finish or extend?" prompt goes away and the server finishes the Cadenza itself (`finish_kind: auto`, no tap involved), deducting one bar of reward. Mark it auto-finished locally at the same moment; your next calendar refresh confirms it.
+- **A late-arriving finish replaces the auto-finish, once.** A finish tap made by planned end + 5 min but sent later (offline) is still accepted. The server recomputes the finish from it and corrects the tokens either way. The finish response then reflects the tap. Until it syncs, show "Finish pending sync" instead of the deduction; after, tell the user the change (e.g. "+10 tokens"). A tap after planned end + 5 min gets `409 window_closed`; a second finish tap gets `409 invalid_state` ([rules §4](../rules.md#4-finishing-a-cadenza)).
+- **Offline:** queue start and finish taps with their original `tapped_at` and idempotency key, and send them in order once back online (for "Finish A and start B": A's finish first). The server accepts taps up to 24 h old.
 
 ## 7. The rules port (previews)
 
@@ -105,6 +124,7 @@ The grid math in brief: bar = 20 min, grid marks at :00/:20/:40, every tap snaps
 
 - Every event has a `kind`: `cadenza` or `tutti`. Both sit on the grid and last whole bars. Show the start/finish controls and token previews on Cadenzas only.
 - A planned event can switch kind with `PATCH`. Switching to Cadenza can fail with `cadenza_overlap`.
+- `DELETE /v1/events/{id}` removes the event. There is no cancelled state: a deleted event is gone. A Cadenza that has started or finished can't be deleted (`409 invalid_state`), because its record and tokens must stay. Planned and missed events can be deleted.
 - `GET /v1/calendar?from=&to=` returns events plus **expanded** cue occurrences for the range (at most 62 days). Use it to draw the calendar and to schedule notifications. `GET /v1/events` lists events only (at most 92 days).
 - Cues can be at any minute, have no duration and never earn tokens. Repeats use RFC 5545 `RRULE`, which the server expands.
 - An occurrence is identified by its **original** time (`original_at`), even after it is moved or snoozed. Its `at` is when it actually fires.
@@ -126,5 +146,5 @@ The grid math in brief: bar = 20 min, grid marks at :00/:20/:40, every tap snaps
 ## 11. Network etiquette
 
 - **Taps go out immediately.**
-- Add **random jitter** to background refreshes, so thousands of devices don't all sync at :00, :20 and :40 (spec §7.2).
+- Add **random jitter** to background refreshes, so thousands of devices don't all sync at :00, :20 and :40.
 - Pass an `X-Request-Id` header if you have one. The server echoes it back and logs it, so a bug report with the ID can be traced to a server log line.

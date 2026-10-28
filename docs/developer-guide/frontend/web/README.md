@@ -2,17 +2,17 @@
 
 Read [the shared frontend guide](../README.md) first.
 
-> **Status:** planned for after the iOS app. Nothing is built yet. The points below come from the spec or are early recommendations, marked as such.
+> **Status:** planned for after the iOS app. Nothing is built yet. The points below are decided unless marked as recommendations.
 
 ## Stack notes
 
-| Concern | Plan | Source |
+| Concern | Plan | Why |
 |---|---|---|
-| Language | TypeScript, the same language as the backend | spec §2 |
-| API types | `openapi-typescript` generated from `Twenty-backend/contracts/openapi.yaml` (pair it with a small typed fetch wrapper such as `openapi-fetch`, recommended) | spec §2 |
-| Rules previews | Reuse the backend's TypeScript `src/rules` instead of writing a third port. It is pure, with no I/O, so it runs in the browser. Package it, or import it from a shared workspace (recommended). | spec §2 |
-| Sign-in | Sign in with Apple JS. Its Services ID must be added to the backend's `APPLE_CLIENT_IDS`. Send the nonce exactly as you gave it to Apple; the server accepts the raw value. | spec §2 |
-| Notifications | None in the MVP. Notifications are an iOS feature; web shows the same calendar. | spec §1 |
+| Language | TypeScript, the same language as the backend | The web app and the server share one copy of the rules code and the API types |
+| API types | `openapi-typescript` generated from `Twenty-backend/contracts/openapi.yaml` (pair it with a small typed fetch wrapper such as `openapi-fetch`, recommended) | The yaml is generated from the backend's routes, so the types can't drift from the server |
+| Rules previews | Reuse the backend's TypeScript `src/rules` instead of writing a third port. It is pure, with no I/O, so it runs in the browser. Package it, or import it from a shared workspace (recommended). | Previews then come from the same code as the server's results |
+| Sign-in | Email + password, and Sign in with Apple JS. Apple's Services ID must be added to the backend's `APPLE_CLIENT_IDS`. Send the nonce exactly as you gave it to Apple; the server accepts the raw value. | One account works on iOS and web. Email also covers users without an Apple ID |
+| Notifications | None in the MVP. Notifications are an iOS feature; web shows the same calendar. | The backend sends no push notifications in the MVP |
 
 ## Things that differ from iOS
 

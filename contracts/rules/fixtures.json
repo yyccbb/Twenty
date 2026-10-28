@@ -1,6 +1,6 @@
 {
   "fixtures_version": 1,
-  "rules_doc": "docs/architecture/backend-tech-stack.md §3",
+  "rules_doc": "docs/developer-guide/rules.md",
   "constants": {
     "bar_minutes": 20,
     "snap_before_minutes": 15,
@@ -20,7 +20,7 @@
     "Event intervals are half-open [start, end): an event ending at 15:00 does not overlap one starting at 15:00.",
     "Calendar entries carry kind: cadenza or tutti. Only Cadenzas are timed, so snap, start, finish and tokens cases always describe a Cadenza.",
     "A Cadenza may not overlap another Cadenza. Tuttis may overlap anything, without limit.",
-    "tapped_at = null in finish cases means the auto-finish job fired at planned_end + 5 min.",
+    "tapped_at = null in finish cases means the auto-finish job fired at planned_end + 5 min. A finish tap after planned_end + 5 min is rejected with window_closed. Replacing an auto-finish with a late-arriving tap is service behaviour, tested in the backend's integration tests, not here.",
     "Conflict and warning ID lists are sorted. Expected objects must match exactly (no extra keys).",
     "Events with status missed are ignored by overlap checks and cascades. There is no cancelled status: deleted events are gone.",
     "In create cases, event_id (when present) names an existing event being edited; it is left out of its own overlap check.",
@@ -591,15 +591,14 @@
       },
       {
         "id": "finish-04",
-        "desc": "Tap after +5 min counts as auto-finish (e.g. queued offline tap)",
+        "desc": "Tap after +5 min is rejected: the window has closed (auto-finish comes only from the job)",
         "input": {
           "recorded_start": "2026-11-02T14:00:00+08:00",
           "planned_end": "2026-11-02T15:00:00+08:00",
           "tapped_at": "2026-11-02T15:05:01+08:00"
         },
         "expected": {
-          "finish_kind": "auto",
-          "recorded_end": "2026-11-02T15:00:00+08:00"
+          "error": "window_closed"
         }
       },
       {
