@@ -17,7 +17,7 @@ These are product decisions (§9 lists them). Never change a rule in code alone:
 
 The rules in §2–§5 and §7 apply to Cadenzas only.
 
-**Event states.** A Cadenza is `planned` until it starts, `in_progress` until it finishes, then `done`. One that nobody starts becomes `missed` once its planned end has passed (§3). A Tutti is only ever `planned`. There is no cancelled state: deleting an event removes it, along with its change history. A Cadenza that has started or finished can't be deleted (`409 invalid_state`), because its record and tokens must stay. Planned and missed events can be deleted.
+**Event states.** A Cadenza is `planned` until it starts, `in_progress` until it finishes, then `done`. One that nobody starts becomes `missed` once its planned end has passed (§3). A Tutti is only ever `planned`. There is no cancelled state: deleting an event removes it, along with its change history. Only planned events can be deleted. A Cadenza that has started, finished or been missed can't be deleted (`409 invalid_state`), because its record, and any tokens it earned, must stay.
 
 ## 1. The 20-minute grid and time zones
 

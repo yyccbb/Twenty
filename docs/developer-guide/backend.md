@@ -150,7 +150,7 @@ REST + JSON over HTTPS, versioned under `/v1`, described by the generated OpenAP
 | | `GET /v1/events/{id}` | One event with its start/finish record |
 | | `POST /v1/events` | Create a Cadenza or Tutti (`kind`); rejects off-grid start, non-integer bars, or a Cadenza overlapping another (`409 cadenza_overlap`) |
 | | `PATCH /v1/events/{id}` | Reschedule / edit / switch `kind` (uses `version` for conflict detection) |
-| | `DELETE /v1/events/{id}` | Delete. The event and its change history are removed; there is no cancelled state. A Cadenza that has started or finished can't be deleted (`409 invalid_state`), since its record and tokens must stay |
+| | `DELETE /v1/events/{id}` | Delete. The event and its change history are removed; there is no cancelled state. Only planned events can be deleted; a Cadenza that has started, finished or been missed gets `409 invalid_state`, since its record, and any tokens it earned, must stay |
 | | `GET /v1/calendar?from=&to=` | Events + **expanded** cue occurrences in one call (also what iOS uses to schedule notifications) |
 | **Recording** (Cadenzas only; a Tutti gets `409 not_cadenza`) | `POST /v1/events/{id}/start` | Body `{tapped_at}` → `recorded_start`, early/late bars; `409 cadenza_overlap` if an early start would overlap another Cadenza; `409 cadenza_in_progress` if another Cadenza hasn't finished yet |
 | | `POST /v1/events/{id}/extend` | Body `{bars, dry_run?}` (in progress only) → new end; returns **every Cadenza pushed by the cascade** and day-end warnings. `dry_run: true` returns the preview without saving |

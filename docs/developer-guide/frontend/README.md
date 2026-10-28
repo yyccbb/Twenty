@@ -73,7 +73,7 @@ Branch on `code`, never on `message` (messages are for logs and may change). Cod
 | `too_early` | 422 | Start tapped more than 2 bars before the planned start. |
 | `tap_too_old`, `tap_in_future` | 422 | Offline tap older than 24 h, or the device clock is ahead by more than 2 min. Tell the user; drop the queued tap. |
 | `window_closed` | 409 | Finish tapped, or extend sent, after planned end + 5 min. The UI shouldn't allow it: check the device clock and drop the queued action. |
-| `invalid_state` | 409 | The event is in the wrong state: for example finishing or extending a Cadenza that isn't in progress (or a second finish tap), deleting a Cadenza that has started, or switching the kind of one that has started. Refetch the event. |
+| `invalid_state` | 409 | The event is in the wrong state: for example finishing or extending a Cadenza that isn't in progress (or a second finish tap), or deleting or switching the kind of a Cadenza that isn't planned (started, finished or missed). Refetch the event. |
 | `unsupported_timezone` | 422 | The zone isn't a whole number of hours from UTC (India, Nepal, …). These zones aren't supported yet. |
 | `invalid_timezone` | 422 | Not an IANA zone name. |
 | `daily_limit_reached` | 429 | AI breakdown limit for today (5 by default, counted per local day). |
@@ -124,7 +124,7 @@ The grid math in brief: bar = 20 min, grid marks at :00/:20/:40, every tap snaps
 
 - Every event has a `kind`: `cadenza` or `tutti`. Both sit on the grid and last whole bars. Show the start/finish controls and token previews on Cadenzas only.
 - A planned event can switch kind with `PATCH`. Switching to Cadenza can fail with `cadenza_overlap`.
-- `DELETE /v1/events/{id}` removes the event. There is no cancelled state: a deleted event is gone. A Cadenza that has started or finished can't be deleted (`409 invalid_state`), because its record and tokens must stay. Planned and missed events can be deleted.
+- `DELETE /v1/events/{id}` removes the event. There is no cancelled state: a deleted event is gone. Only planned events can be deleted. A Cadenza that has started, finished or been missed can't be deleted (`409 invalid_state`), because its record, and any tokens it earned, must stay.
 - `GET /v1/calendar?from=&to=` returns events plus **expanded** cue occurrences for the range (at most 62 days). Use it to draw the calendar and to schedule notifications. `GET /v1/events` lists events only (at most 92 days).
 - Cues can be at any minute, have no duration and never earn tokens. Repeats use RFC 5545 `RRULE`, which the server expands.
 - An occurrence is identified by its **original** time (`original_at`), even after it is moved or snoozed. Its `at` is when it actually fires.
