@@ -36,8 +36,8 @@ The app schedules every notification itself. Each needs to be rescheduled when t
 | Notification | Scheduled from | Reschedule when |
 |---|---|---|
 | Planning prompt (e.g. nightly "plan tomorrow") | `settings.planning_prompts` (ISO weekday + `local_time`) | Settings change |
-| Start prompt | Cadenza `planned_start` | Cadenza created, moved, cancelled or switched kind; a cascade moves it (`moved` in the extend response) |
-| Finish / end prompt | Cadenza `planned_end` | After start (a late start shortens the event), extend or shorten |
+| Start prompt | Cadenza `planned_start` | Cadenza created, moved, deleted or switched kind; a cascade moves it (`moved` in the extend response) |
+| "Finish or extend?" prompt | Cadenza `planned_end` − 5 min | After start (a late start shortens the event), extend or shorten. If the next Cadenza starts at this one's end, the prompt switches to "Finish A and start B" at `planned_end` |
 | Cue occurrence | `/v1/calendar` occurrences (`at`) | Cue or occurrence changes |
 
 Tuttis get no start or finish prompts.

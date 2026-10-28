@@ -49,6 +49,7 @@ Branch on `code`, never on `message` (messages are for logs and may change). Cod
 | Code | Status | What the client should do |
 |---|---|---|
 | `cadenza_overlap` | 409 | A Cadenza would overlap another Cadenza. `conflicts` lists the clashing Cadenza IDs (sorted). Highlight them. |
+| `cadenza_in_progress` | 409 | Start sent while another Cadenza is still in progress. `conflicts` holds its ID. Finish it first. |
 | `not_cadenza` | 409 | Start, extend or finish was sent for a Tutti. Client bug: only show those actions on Cadenzas. |
 | `version_conflict` | 409 | Someone else changed this item. Refetch it, then reapply or ask the user. |
 | `bar_misaligned`, `invalid_duration`, `invalid_bars` | 422 | The client sent an off-grid start or a non-whole-bar length. That's a client bug: snap before sending. |
@@ -78,6 +79,7 @@ The heart of the app. Only **Cadenzas** are recorded; Tuttis have no start, exte
 - **Send the raw tap time.** `POST /v1/events/{id}/start` and `/finish` take `{ tapped_at }`: the device time of the tap. Never send a snapped or computed time. The server snaps it to the 20-minute grid.
 - **Start:** the response has `outcome` (`early` / `on_time` / `late` / `missed`), `recorded_start`, `early_bars` and `late_bars`. A late start shortens the Cadenza, because the planned end doesn't move. Reschedule the finish notification from the response.
 - **Extend:** `POST /v1/events/{id}/extend { bars, dry_run }`. Call it with `dry_run: true` first to preview. The response lists every Cadenza the cascade would push (`moved`) and any `day_end_warnings`. Each moves only as far as needed, so gaps are used up first, and Tuttis never move. Confirm with the user, then send it again with `dry_run: false`. Update every moved event locally from `moved`.
+- **One at a time:** a start fails with `cadenza_in_progress` while another Cadenza is in progress. For back-to-back Cadenzas, the end prompt of A becomes "Finish A and start B" from A's end until end + 5 min; send A's finish, then B's start, with the same `tapped_at` (spec §3.3).
 - **Finish:** the response has `finish_kind` (`on_time` / `shortened` / `abandoned` / `auto`), `recorded_end`, the token breakdown, `tokens_awarded` and the new `token_balance`.
 - **Auto-finish:** if the user does nothing by planned end + 5 min, the server finishes the Cadenza itself and deducts one bar of reward. Your next calendar refresh shows this.
 - **Offline:** queue start and finish taps with their original `tapped_at` and idempotency key, and send them in order once back online. The server accepts taps up to 24 h old.

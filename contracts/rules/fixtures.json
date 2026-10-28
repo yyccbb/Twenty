@@ -22,8 +22,9 @@
     "A Cadenza may not overlap another Cadenza. Tuttis may overlap anything, without limit.",
     "tapped_at = null in finish cases means the auto-finish job fired at planned_end + 5 min.",
     "Conflict and warning ID lists are sorted. Expected objects must match exactly (no extra keys).",
-    "Events with status cancelled or missed are ignored by overlap checks and cascades.",
-    "In create cases, event_id (when present) names an existing event being edited; it is left out of its own overlap check."
+    "Events with status missed are ignored by overlap checks and cascades. There is no cancelled status: deleted events are gone.",
+    "In create cases, event_id (when present) names an existing event being edited; it is left out of its own overlap check.",
+    "Calendar entries without a status are planned. A start fails with cadenza_in_progress while another Cadenza is in_progress."
   ],
   "groups": {
     "snap": [
@@ -388,6 +389,163 @@
           "recorded_start": "2026-11-02T13:40:00+08:00",
           "early_bars": 1,
           "late_bars": 0
+        }
+      },
+      {
+        "id": "start-17",
+        "desc": "Back-to-back: next Cadenza can't start while the earlier one is in progress",
+        "input": {
+          "planned_start": "2026-11-02T15:00:00+08:00",
+          "planned_end": "2026-11-02T16:00:00+08:00",
+          "tapped_at": "2026-11-02T14:58:00+08:00",
+          "event_id": "B",
+          "calendar": [
+            {
+              "id": "A",
+              "kind": "cadenza",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "in_progress"
+            },
+            {
+              "id": "B",
+              "kind": "cadenza",
+              "start": "2026-11-02T15:00:00+08:00",
+              "end": "2026-11-02T16:00:00+08:00"
+            }
+          ]
+        },
+        "expected": {
+          "outcome": "rejected",
+          "error": "cadenza_in_progress",
+          "conflicts": [
+            "A"
+          ]
+        }
+      },
+      {
+        "id": "start-18",
+        "desc": "Early start blocked while another Cadenza is in progress",
+        "input": {
+          "planned_start": "2026-11-02T15:40:00+08:00",
+          "planned_end": "2026-11-02T16:40:00+08:00",
+          "tapped_at": "2026-11-02T15:00:00+08:00",
+          "event_id": "B",
+          "calendar": [
+            {
+              "id": "A",
+              "kind": "cadenza",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "in_progress"
+            },
+            {
+              "id": "B",
+              "kind": "cadenza",
+              "start": "2026-11-02T15:40:00+08:00",
+              "end": "2026-11-02T16:40:00+08:00"
+            }
+          ]
+        },
+        "expected": {
+          "outcome": "rejected",
+          "error": "cadenza_in_progress",
+          "conflicts": [
+            "A"
+          ]
+        }
+      },
+      {
+        "id": "start-19",
+        "desc": "Back-to-back: earlier one finished before E, next starts on time",
+        "input": {
+          "planned_start": "2026-11-02T15:00:00+08:00",
+          "planned_end": "2026-11-02T16:00:00+08:00",
+          "tapped_at": "2026-11-02T14:58:00+08:00",
+          "event_id": "B",
+          "calendar": [
+            {
+              "id": "A",
+              "kind": "cadenza",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "done"
+            },
+            {
+              "id": "B",
+              "kind": "cadenza",
+              "start": "2026-11-02T15:00:00+08:00",
+              "end": "2026-11-02T16:00:00+08:00"
+            }
+          ]
+        },
+        "expected": {
+          "outcome": "on_time",
+          "recorded_start": "2026-11-02T15:00:00+08:00",
+          "early_bars": 0,
+          "late_bars": 0
+        }
+      },
+      {
+        "id": "start-20",
+        "desc": "Back-to-back: \"Finish A and start B\" at the last second",
+        "input": {
+          "planned_start": "2026-11-02T15:00:00+08:00",
+          "planned_end": "2026-11-02T16:00:00+08:00",
+          "tapped_at": "2026-11-02T15:05:00+08:00",
+          "event_id": "B",
+          "calendar": [
+            {
+              "id": "A",
+              "kind": "cadenza",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "done"
+            },
+            {
+              "id": "B",
+              "kind": "cadenza",
+              "start": "2026-11-02T15:00:00+08:00",
+              "end": "2026-11-02T16:00:00+08:00"
+            }
+          ]
+        },
+        "expected": {
+          "outcome": "on_time",
+          "recorded_start": "2026-11-02T15:00:00+08:00",
+          "early_bars": 0,
+          "late_bars": 0
+        }
+      },
+      {
+        "id": "start-21",
+        "desc": "Back-to-back: earlier one auto-finished at E + 5, next is late",
+        "input": {
+          "planned_start": "2026-11-02T15:00:00+08:00",
+          "planned_end": "2026-11-02T16:00:00+08:00",
+          "tapped_at": "2026-11-02T15:05:01+08:00",
+          "event_id": "B",
+          "calendar": [
+            {
+              "id": "A",
+              "kind": "cadenza",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T15:00:00+08:00",
+              "status": "done"
+            },
+            {
+              "id": "B",
+              "kind": "cadenza",
+              "start": "2026-11-02T15:00:00+08:00",
+              "end": "2026-11-02T16:00:00+08:00"
+            }
+          ]
+        },
+        "expected": {
+          "outcome": "late",
+          "recorded_start": "2026-11-02T15:20:00+08:00",
+          "early_bars": 0,
+          "late_bars": 1
         }
       }
     ],
@@ -1070,7 +1228,7 @@
       },
       {
         "id": "extend-06",
-        "desc": "Cancelled and missed events are ignored",
+        "desc": "Missed events are ignored",
         "input": {
           "calendar": [
             {
@@ -1079,13 +1237,6 @@
               "start": "2026-11-02T14:00:00+08:00",
               "end": "2026-11-02T15:00:00+08:00",
               "status": "in_progress"
-            },
-            {
-              "id": "B",
-              "kind": "cadenza",
-              "start": "2026-11-02T15:00:00+08:00",
-              "end": "2026-11-02T15:20:00+08:00",
-              "status": "cancelled"
             },
             {
               "id": "C",
@@ -1110,40 +1261,6 @@
       },
       {
         "id": "extend-07",
-        "desc": "Would push an event already in progress: rejected",
-        "input": {
-          "calendar": [
-            {
-              "id": "A",
-              "kind": "cadenza",
-              "start": "2026-11-02T14:00:00+08:00",
-              "end": "2026-11-02T15:00:00+08:00",
-              "status": "in_progress"
-            },
-            {
-              "id": "C",
-              "kind": "cadenza",
-              "start": "2026-11-02T15:00:00+08:00",
-              "end": "2026-11-02T15:20:00+08:00",
-              "status": "in_progress"
-            }
-          ],
-          "event_id": "A",
-          "bars": 1,
-          "now": "2026-11-02T15:01:00+08:00",
-          "timezone": "Asia/Shanghai",
-          "day_end_local_time": "00:00"
-        },
-        "expected": {
-          "ok": false,
-          "error": "pushed_event_locked",
-          "conflicts": [
-            "C"
-          ]
-        }
-      },
-      {
-        "id": "extend-08",
         "desc": "Extend from the end prompt, last second",
         "input": {
           "calendar": [
@@ -1169,7 +1286,7 @@
         }
       },
       {
-        "id": "extend-09",
+        "id": "extend-08",
         "desc": "Too late to extend: already auto-finished",
         "input": {
           "calendar": [
@@ -1193,7 +1310,7 @@
         }
       },
       {
-        "id": "extend-10",
+        "id": "extend-09",
         "desc": "Zero bars is invalid",
         "input": {
           "calendar": [
@@ -1217,7 +1334,7 @@
         }
       },
       {
-        "id": "extend-11",
+        "id": "extend-10",
         "desc": "Only in-progress events can be extended",
         "input": {
           "calendar": [
@@ -1241,7 +1358,7 @@
         }
       },
       {
-        "id": "extend-12",
+        "id": "extend-11",
         "desc": "Push ending exactly at day end: no warning",
         "input": {
           "calendar": [
@@ -1280,7 +1397,7 @@
         }
       },
       {
-        "id": "extend-13",
+        "id": "extend-12",
         "desc": "Push past day end (00:00): allowed with a warning",
         "input": {
           "calendar": [
@@ -1321,7 +1438,7 @@
         }
       },
       {
-        "id": "extend-14",
+        "id": "extend-13",
         "desc": "Same push with day end at 02:00: no warning",
         "input": {
           "calendar": [
@@ -1360,7 +1477,7 @@
         }
       },
       {
-        "id": "extend-15",
+        "id": "extend-14",
         "desc": "The extended event itself crossing day end is warned",
         "input": {
           "calendar": [
@@ -1388,7 +1505,7 @@
         }
       },
       {
-        "id": "extend-16",
+        "id": "extend-15",
         "desc": "Minimal shifts through gaps: each Cadenza moves only as far as needed",
         "input": {
           "calendar": [
@@ -1446,7 +1563,7 @@
         }
       },
       {
-        "id": "extend-17",
+        "id": "extend-16",
         "desc": "A Tutti can't be extended",
         "input": {
           "calendar": [
@@ -1589,16 +1706,9 @@
       },
       {
         "id": "create-05",
-        "desc": "Cancelled and missed Cadenzas don't count",
+        "desc": "Missed Cadenzas don't count",
         "input": {
           "calendar": [
-            {
-              "id": "A",
-              "kind": "cadenza",
-              "start": "2026-11-02T14:00:00+08:00",
-              "end": "2026-11-02T15:00:00+08:00",
-              "status": "cancelled"
-            },
             {
               "id": "B",
               "kind": "cadenza",

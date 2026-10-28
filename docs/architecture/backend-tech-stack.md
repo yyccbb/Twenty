@@ -109,9 +109,20 @@ The 5-minute grace applies everywhere. There is **one exception, at the planned 
 
 An early start is also **rejected** if the longer block would **overlap another Cadenza** (§3.6). Tuttis don't matter. The app then asks the user to move things first.
 
+**One Cadenza at a time.** A Cadenza can't be started, on time or early, while another Cadenza is still in progress (`409 cadenza_in_progress`, with the in-progress Cadenza's ID). The earlier one must be finished first, by a finish tap, an extend-then-finish, or auto-finish at its `E + 5`.
+
+**Back-to-back Cadenzas.** When A ends at `E` and B starts at `E`:
+
+| When the user acts on A's prompt | What happens |
+|---|---|
+| Finish tap in `(E − 5, E)` | A finishes on time. B's start prompt appears at `E` as usual. |
+| Tap in `[E, E + 5]` | The prompt reads **"Finish A and start B"**. One tap finishes A (on time) and starts B (on time). iOS sends A's finish, then B's start, with the same `tapped_at`. |
+| Extend | A is extended and B is pushed (§3.5). |
+| Nothing by `E + 5` | A is **auto-finished** (one bar deducted, §3.4). B's start window `(E − 15, E + 5]` has closed, so B is **late by at least 1 bar**. |
+
 ### 3.4 Finishing a Cadenza
 
-`E` is the Cadenza's current planned end (after any extension). From `E` to `E + 5 min` iOS shows a **"Finish or extend?"** prompt.
+`E` is the Cadenza's current planned end (after any extension). At `E − 5 min`, when the on-time window `(E − 5, E + 5]` opens, iOS shows a **"Finish or extend?"** prompt. It stays up until `E + 5`.
 
 | What happens | Recorded end | Result |
 |---|---|---|
@@ -132,23 +143,23 @@ Auto-finish on the server is a delayed background job set for `E + 5` (pg-boss `
 
 ### 3.5 Extending a Cadenza
 
-- The user can extend **at any time during the Cadenza**, or from the "Finish or extend?" prompt (between `E` and `E + 5`).
+- The user can extend **at any time during the Cadenza**, or from the "Finish or extend?" prompt (`(E − 5, E + 5]`).
 - An extension adds whole bars: `E_new = E + 20 min × n`. The finish window and auto-finish then apply to `E_new`.
-- Later **Cadenzas** that the extension now runs into are **pushed later** (cascade). Tuttis are never moved.
+- Later **Cadenzas** that the extension now runs into are **pushed later**, and the push **cascades**: if a pushed Cadenza now runs into the Cadenza after it, that one is pushed too, and so on down the line. Tuttis are never moved.
   1. Go through the later Cadenzas in start order, starting from the end `edge = E_new`.
-  2. If a Cadenza starts before `edge`, shift it so it **starts exactly at `edge`**, keeping its duration. This is the smallest shift that clears the overlap, so any gap before it is used up first. Its new end becomes the new `edge`.
+  2. If a Cadenza starts before `edge`, shift it so it **starts exactly at `edge`**, keeping its duration. This is the smallest shift that clears the overlap, so any gap before it is used up first. Its new end becomes the new `edge`, and the next Cadenza is checked against it.
   3. Stop at the first Cadenza that starts at or after `edge`; nothing after it moves.
   4. Everything happens in **one transaction**. The response lists every moved Cadenza so iOS can reschedule their notifications. The app shows a **preview** first (`dry_run`).
-  5. If a Cadenza that would be pushed is already in progress or done, the extension is rejected (`pushed_event_locked`).
+  5. A pushed Cadenza is always still planned: no other Cadenza can be started while this one is in progress (§3.3), and every later one ends after it. So a cascade never moves a started or finished Cadenza.
 
-  Example: A runs 14:00–15:00, B 15:20–16:00, C 16:20–16:40. Extending A by 3 bars to 16:00 moves B to 16:00–16:40 (40 min) and C to 16:40–17:00 (20 min).
+  Example: A runs 14:00–15:00, B 15:20–16:00, C 16:20–16:40. Extending A by 3 bars to 16:00 pushes B to 16:00–16:40; B now runs into C, so C is pushed to 16:40–17:00.
 - **Day end:** the user sets when their day ends (`day_end_local_time`, default 00:00, e.g. 02:00). Pushes past it are **allowed but flagged with a warning** in the preview.
 
 ### 3.6 Overlap rule
 
 **A Cadenza may never overlap another Cadenza**, so the user only ever has one focused task at a time. Tuttis may overlap Cadenzas and each other, without limit. Cues don't count.
 
-The rule is checked on create, on edit (including switching an event's kind) and on early start. Cancelled and missed Cadenzas are ignored. Violations return `409 cadenza_overlap` with the conflicting Cadenza IDs so the app can ask the user to shift things. Extensions can't break the rule, because the cascade moves every Cadenza in the way (§3.5).
+The rule is checked on create, on edit (including switching an event's kind) and on early start. Separately, only one Cadenza can be in progress at a time (§3.3). Missed Cadenzas are ignored. Violations return `409 cadenza_overlap` with the conflicting Cadenza IDs so the app can ask the user to shift things. Extensions can't break the rule, because the cascade moves every Cadenza in the way (§3.5).
 
 **Switching kinds:** a planned event can switch between Tutti and Cadenza with `PATCH`. Switching to Cadenza runs the overlap check. A Cadenza that has started, finished or been missed can't switch (`409 invalid_state`).
 
@@ -210,7 +221,7 @@ ai_breakdowns    id, goal_id, status(queued|running|done|failed), model, prompt_
 events           id, user_id, title, notes, goal_id?, breakdown_item_id?,
                  kind(cadenza|tutti),
                  planned_start (timestamptz, on grid), duration_bars (int ≥ 1),
-                 status(planned|in_progress|done|missed|cancelled),           ← Tuttis use planned|cancelled only
+                 status(planned|in_progress|done|missed),                     ← Tuttis use planned only
                  version (optimistic locking)
 event_records    event_id (PK), start_tapped_at, finish_tapped_at,           ← Cadenzas only; raw device times
                  recorded_start, recorded_end, late_bars, early_bars,         ← computed by server
@@ -253,9 +264,9 @@ The ledger is **append-only**: no updates or deletes; corrections are new entrie
 | **Calendar** | `GET /v1/events?from=&to=` | Events in a date range |
 | | `POST /v1/events` | Create a Cadenza or Tutti (`kind`); rejects off-grid start, non-integer bars, or a Cadenza overlapping another (`409 cadenza_overlap`) |
 | | `PATCH /v1/events/{id}` | Reschedule / edit / switch `kind` (uses `version` for conflict detection) |
-| | `DELETE /v1/events/{id}` | Cancel |
+| | `DELETE /v1/events/{id}` | Delete. The event and its change history are removed; there is no cancelled state. A Cadenza that has started or finished can't be deleted (`409 invalid_state`), since its record and tokens must stay |
 | | `GET /v1/calendar?from=&to=` | Events + **expanded** cue occurrences in one call (also what iOS uses to schedule notifications) |
-| **Recording** (Cadenzas only; a Tutti gets `409 not_cadenza`) | `POST /v1/events/{id}/start` | Body `{tapped_at}` → `recorded_start`, early/late bars; `409 cadenza_overlap` if an early start would overlap another Cadenza |
+| **Recording** (Cadenzas only; a Tutti gets `409 not_cadenza`) | `POST /v1/events/{id}/start` | Body `{tapped_at}` → `recorded_start`, early/late bars; `409 cadenza_overlap` if an early start would overlap another Cadenza; `409 cadenza_in_progress` if another Cadenza hasn't finished yet |
 | | `POST /v1/events/{id}/extend` | Body `{bars, dry_run?}` (in progress only) → new end; returns **every Cadenza pushed by the cascade** and day-end warnings. `dry_run: true` returns the preview without saving |
 | | `POST /v1/events/{id}/finish` | Body `{tapped_at}` → `recorded_end`, finish kind (on time / shortened / abandoned), **tokens awarded** |
 | **Cues** | `GET/POST/PATCH/DELETE /v1/cues[/{id}]` | CRUD for cues, including repeat rules. `PATCH` and `DELETE` on a repeating cue take `{scope: this \| following \| all, occurrence}` |
@@ -391,6 +402,7 @@ These cost little now and are expensive to add later:
 | Q16 | Two kinds of events: **Cadenza** (timed, rewarded) and **Tutti** (ordinary). Both use the grid; only Cadenzas earn tokens; planned events can switch kind | §3, §3.6 |
 | Q17 | Names: a 20-minute unit is a **bar**; a reminder is a **cue** | §3.1, §3.8 |
 | Q18 | **Email + password** sign-up/sign-in alongside Sign in with Apple. MVP checks the email's format only (no verification email, no password reset yet); passwords 8–128 chars. Email and Apple accounts stay **separate**, even when the addresses match | §2, §4, §5.1 |
+| Q19 | **One Cadenza in progress at a time**: the next can't start until the current one finishes. Back-to-back Cadenzas share a "Finish A and start B" prompt in `[E, E + 5]` | §3.3 |
 
 ### 8.2 Still open
 
