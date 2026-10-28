@@ -326,11 +326,7 @@ jobs:
           tags: registry.cn-hongkong.aliyuncs.com/<namespace>/twenty-backend:${{ github.sha }}
 ```
 
-## 14. Decisions the backend made
-
-Where the product rules were silent, the backend made eleven calls of its own: late offline taps, the close_stale backstop, account deletion, unsupported time zones, the day-end anchor, cue details, size caps, abandoned events, the AI limit's day, refresh-token reuse, and the default event kind. They are listed in the [backend README](../../../Twenty-backend/README.md#decisions-the-rules-left-open). If you change one, update that list.
-
-## 15. Troubleshooting
+## 14. Troubleshooting
 
 | Symptom | Fix |
 |---|---|

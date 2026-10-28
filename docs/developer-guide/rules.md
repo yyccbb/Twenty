@@ -19,10 +19,12 @@ The rules in §2–§5 and §7 apply to Cadenzas only.
 
 **Event states.** A Cadenza is `planned` until it starts, `in_progress` until it finishes, then `done` (an auto-finished Cadenza is `done` with `finish_kind: auto`, §4). One that nobody starts becomes `missed` once its planned end has passed (§3). A Tutti is only ever `planned`. There is no cancelled state: deleting an event removes it, along with its change history. Only planned events can be deleted. A Cadenza that has started, finished or been missed can't be deleted (`409 invalid_state`), because its record, and any tokens it earned, must stay.
 
+**Editing.** Only planned events can be moved or resized with `PATCH`. Once a Cadenza has started, finished or been missed, its planned start and length are fixed (`409 invalid_state`); what actually happened is recorded instead (§3–§4). The only way to lengthen a running Cadenza is an extension (§5), which is recorded separately from the plan.
+
 ## 1. The 20-minute grid and time zones
 
 - One **bar** is 20 minutes. Grid marks are :00, :20 and :40.
-- Events of both kinds: the start must sit on a grid mark, and `duration_bars` is a whole number ≥ 1.
+- Events of both kinds: the start must sit on a grid mark, and `duration_bars` is a whole number from 1 to 72 (24 h).
 - **No Cadenzas in the past.** A Cadenza's planned start can't be earlier than now, by the server's clock when the request arrives. At 14:03 the earliest a new Cadenza can start is 14:20; tapping start right away then counts as 1 bar early (§3). The check runs whenever a Cadenza's start is set: on create, on an edit that moves it, and when a Tutti switches to Cadenza. An edit that leaves the start alone isn't checked. Violations return `422 start_in_past`. Tuttis can be planned at any time, past included.
 - **Supported for now: time zones that are a whole number of hours from UTC** (including their daylight-saving shifts). For these, the local :00 / :20 / :40 marks are also UTC :00 / :20 / :40 marks, so **all grid math runs in UTC**. China (UTC+8), most of Europe, the Americas, Japan, Korea and most of Southeast Asia qualify.
 - All times are stored as UTC `timestamptz`. The user's IANA time zone (e.g. `Asia/Shanghai`) is kept for display, day boundaries and the day-end setting (§5).
@@ -73,7 +75,7 @@ The 5-minute grace applies everywhere. There is **one exception, at the planned 
 
 An early start is also **rejected** if the longer block would **overlap another Cadenza** (§6), for example one planned just before it that hasn't been started yet.
 
-A Cadenza that nobody starts is marked **missed** once its planned end has passed (the backend's `events.close_stale` job, every 20 minutes; Tuttis are left alone). It earns nothing and costs nothing (§7).
+A Cadenza that nobody starts is marked **missed** once its planned end has passed (the backend's `events.close_stale` job, every 20 minutes; Tuttis are left alone). It earns nothing and costs nothing (§7). A valid start tap that arrives late, from a device that was offline (within the 24 h window, §2), is still accepted even if the Cadenza has already been marked missed: it was started, and the server only heard about it late.
 
 **One Cadenza at a time.** A Cadenza can't be started, on time or early, while another Cadenza is still in progress (`409 cadenza_in_progress`, with the in-progress Cadenza's ID). The earlier one must be finished first, by a finish tap, an extend-then-finish, or auto-finish at its `E + 5`.
 
@@ -107,7 +109,7 @@ A Cadenza that nobody starts is marked **missed** once its planned end has passe
 
 **Auto-finish and late-arriving taps.** At `E + 5` the "Finish or extend?" prompt goes away, so the user can't tap finish or extend any more.
 
-1. **At `E + 5` the server auto-finishes.** A delayed background job (pg-boss `startAfter`, rescheduled whenever `E` changes) marks the Cadenza done with `finish_kind: auto` and pays the reward with one bar deducted straight away. No tap is involved.
+1. **At `E + 5` the server auto-finishes.** A delayed background job (pg-boss `startAfter`, rescheduled whenever `E` changes) marks the Cadenza done with `finish_kind: auto` and pays the reward with one bar deducted straight away. No tap is involved. As a safety net, `events.close_stale` (§3) also auto-finishes any Cadenza still in progress more than 6 minutes after `E`, in case its job was lost; otherwise it would stay in progress and block every later start (§3).
 2. **A finish tap made by `E + 5` that arrives later replaces it, once.** If the device was offline, its queued finish tap (`tapped_at ≤ E + 5`) is sent at the next contact with the server. The server then recomputes the finish from that tap as if it had arrived in time, and writes the difference as a ledger `adjustment`. The difference can go either way: an on-time tap gives back the deducted bar, and an early tap can pay less than the auto-finish did. The frontend tells the user (e.g. "Your 14:58 finish synced: +10 tokens").
 3. **Everything else is rejected:**
    - a finish tap with `tapped_at` after `E + 5`: `409 window_closed`. The UI can't produce one, so it's a client bug or a wrong device clock;
@@ -122,7 +124,7 @@ On the device, the frontend also marks the Cadenza auto-finished locally at `E +
 ## 5. Extending a Cadenza
 
 - The user can extend **at any time during the Cadenza**, or from the "Finish or extend?" prompt (`(E − 5, E + 5]`).
-- An extension adds whole bars: `E_new = E + 20 min × n`. The finish window and auto-finish then apply to `E_new`.
+- An extension adds whole bars, at most 72 at a time: `E_new = E + 20 min × n`. The finish window and auto-finish then apply to `E_new`.
 - Later **Cadenzas** that the extension now runs into are **pushed later**, and the push **cascades**: if a pushed Cadenza now runs into the Cadenza after it, that one is pushed too, and so on down the line. Tuttis are never moved.
   1. Go through the later Cadenzas in start order, starting from the end `edge = E_new`.
   2. If a Cadenza starts before `edge`, shift it so it **starts exactly at `edge`**, keeping its duration. This is the smallest shift that clears the overlap, so any gap before it is used up first. Its new end becomes the new `edge`, and the next Cadenza is checked against it.
@@ -131,13 +133,13 @@ On the device, the frontend also marks the Cadenza auto-finished locally at `E +
   5. A pushed Cadenza is always still planned: no other Cadenza can be started while this one is in progress (§3), and every later one ends after it. So a cascade never moves a started or finished Cadenza.
 
   Example: A runs 14:00–15:00, B 15:20–16:00, C 16:20–16:40. Extending A by 3 bars to 16:00 pushes B to 16:00–16:40; B now runs into C, so C is pushed to 16:40–17:00.
-- **Day end:** the user sets when their day ends (`day_end_local_time`, default 00:00, e.g. 02:00). Pushes past it are **allowed but flagged with a warning** in the preview.
+- **Day end:** the user sets when their day ends (`day_end_local_time`, default 00:00, e.g. 02:00). Pushes past it are **allowed but flagged with a warning** in the preview. Each Cadenza is checked against the first day end strictly after its original start, before the push: with day end 02:00, a Cadenza planned for 23:00 is warned if it now ends after 02:00 the next morning. The extended Cadenza itself is checked the same way.
 
 ## 6. Overlap
 
 **A Cadenza may never overlap another Cadenza**, so the user only ever has one focused task at a time. Tuttis may overlap Cadenzas and each other, without limit. Cues don't count. Intervals are half-open `[start, end)`: a Cadenza ending at 15:00 doesn't overlap one starting at 15:00.
 
-The rule is checked on create, on edit (including switching an event's kind) and on early start. Separately, only one Cadenza can be in progress at a time (§3). Missed Cadenzas are ignored. Violations return `409 cadenza_overlap` with the conflicting Cadenza IDs (sorted) so the app can ask the user to shift things. Extensions can't break the rule, because the cascade moves every Cadenza in the way (§5).
+The rule is checked on create, on edit (including switching an event's kind) and on early start. Separately, only one Cadenza can be in progress at a time (§3). Missed Cadenzas are ignored. A finished Cadenza occupies only the time it actually ran; an abandoned one occupies nothing. Violations return `409 cadenza_overlap` with the conflicting Cadenza IDs (sorted) so the app can ask the user to shift things. Extensions can't break the rule, because the cascade moves every Cadenza in the way (§5).
 
 **Switching kinds:** a planned event can switch between Tutti and Cadenza with `PATCH`. Switching to Cadenza runs the overlap check and the past check (§1). A Cadenza that has started, finished or been missed can't switch (`409 invalid_state`).
 
@@ -181,7 +183,8 @@ A **cue** is a reminder, a separate kind of item: a title and a time, **no durat
 - **Per-occurrence state** (done, skipped, snoozed, moved) lives in its own table, keyed by the occurrence's original time.
 - **Editing a repeating cue** offers the same three scopes as Apple Calendar:
   - **This occurrence:** stored as a per-occurrence override (`moved` / `skipped`) or a changed copy of that one occurrence.
-  - **This and following:** the series is **split**. The old rule gets an `UNTIL` just before the chosen occurrence, and a new cue starts there with the edited fields. Both share a `series_id` so the app can show them as one series. Overrides after the split point move to the new cue.
+  - **This and following:** the series is **split**. The old rule gets an `UNTIL` just before the chosen occurrence, and a new cue starts there with the edited fields. Both share a `series_id` so the app can show them as one series. Overrides after the split point move to the new cue. A rule that ends after a set number of occurrences (`COUNT`) keeps its total: the new cue gets the remaining count.
   - **All occurrences:** edit the rule in place and keep overrides whose original time still exists in the new rule.
+  - Each scope applies to the cue being edited, not to every cue sharing its `series_id`: after a split, "all occurrences" edits only that part of the series.
 - Cues are never pushed by cascades and don't count toward the overlap rule.
 - **Clients don't expand repeat rules.** `GET /v1/calendar` returns the expanded occurrences, so the frontend needs no repeat-rule engine of its own. It schedules notifications from those occurrences in a rolling window ([local notifications](frontend/ios/README.md#4-local-notifications)).
