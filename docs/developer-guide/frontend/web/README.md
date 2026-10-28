@@ -2,7 +2,7 @@
 
 Read [the shared frontend guide](../README.md) first.
 
-> **Status:** planned for after the iOS app. Nothing is built yet. The points below are decided unless marked as recommendations.
+> The points below are decided unless marked as recommendations.
 
 ## Stack notes
 
@@ -16,7 +16,7 @@ Read [the shared frontend guide](../README.md) first.
 
 ## Things that differ from iOS
 
-- **Token storage:** don't keep the refresh token in `localStorage`. Prefer memory for the access token, plus a storage approach decided when web auth is designed. The backend currently returns tokens in JSON bodies, not cookies, so web may need backend changes. Raise this before building.
+- **Token storage:** don't keep the refresh token in `localStorage`. Prefer memory for the access token. Refresh-token storage is decided when web auth is designed; the API returns tokens in JSON bodies, not cookies, so a cookie-based approach would need API changes.
 - **Time zone:** read it from `Intl.DateTimeFormat().resolvedOptions().timeZone` and sync it through `PATCH /v1/me/settings` like iOS does. Handle `unsupported_timezone` the same way.
 - **Multiple tabs:** refresh must stay single-flight *across tabs* (a `BroadcastChannel` or Web Locks), or two tabs refreshing together will revoke every session.
 - **Mainland China:** use `registry.npmmirror.com` for npm installs there, and avoid CDNs that are blocked in China.

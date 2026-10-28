@@ -2,7 +2,7 @@
 
 Read [the shared frontend guide](../README.md) first; this page covers only what is specific to iOS.
 
-> **Status:** the iOS app doesn't exist yet. Anything here not fixed by the backend or [the rules](../../rules.md) is a recommendation, marked as such, not a description of existing code.
+> Anything here not fixed by the backend or [the rules](../../rules.md) is a recommendation, marked as such.
 
 ## 1. Stack
 

@@ -10,7 +10,7 @@ This folder is for the people building it. Pick your guide:
 | The API, the job worker, the database, deployment | [backend.md](backend.md) |
 | Any app that talks to the API | [frontend/README.md](frontend/README.md), then your platform: |
 | · the iOS app | [frontend/ios/README.md](frontend/ios/README.md) |
-| · the web app (planned) | [frontend/web/README.md](frontend/web/README.md) |
+| · the web app | [frontend/web/README.md](frontend/web/README.md) |
 
 ## Where things live
 
@@ -20,14 +20,12 @@ This folder is for the people building it. Pick your guide:
 | Shared rules test cases | [`../../contracts/rules/fixtures.json`](../../contracts/rules/fixtures.json) | Product. Every rules implementation must pass them; nobody edits them to make a test pass. |
 | Backend code | [`Twenty-backend`](../../../Twenty-backend/README.md) (sibling repo) | Backend |
 | API contract | [`Twenty-backend/contracts/openapi.yaml`](../../../Twenty-backend/contracts/openapi.yaml) | Generated from the backend's routes and committed there. Clients generate their code from it. |
-| iOS app | not created yet | iOS |
-| Web app | not created yet | Web |
 | Market research | [`../ideation/market-research.md`](../ideation/market-research.md) | Background only |
 
 ## How the pieces fit
 
 ```
-                 ../Twenty/contracts/rules/fixtures.json
+                 contracts/rules/fixtures.json
                   │            │                 │
                   ▼            ▼                 ▼
    Twenty-backend/src/rules   iOS Swift rules   (web imports the TS rules)

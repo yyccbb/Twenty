@@ -31,12 +31,10 @@ What the backend does **not** do in the MVP: send push notifications, real-time 
 | ORM / migrations | **Drizzle ORM + drizzle-kit** | SQL-like, typed, migrations are plain SQL files you can read |
 | Background jobs and cron | **pg-boss** (job queue stored in Postgres) | Runs AI breakdowns in the background and nightly maintenance with no Redis to operate |
 | Auth | **Sign in with Apple** (server verifies Apple's ID token with `jose`) or **email + password** (scrypt hash; email format checked, not verified, in the MVP) → issues own **JWT access token (15 min) + rotating refresh token** | Works in China; email also covers users without an Apple ID and the web app; phone/SMS can be added for the China launch |
-| AI | **DeepSeek Flash** (`deepseek-flash`) through DeepSeek's OpenAI-compatible API (the `openai` SDK with a custom `baseURL`), behind an `AiProvider` interface | Claude and OpenAI don't serve mainland China or Hong Kong. Behind the interface, a global deployment can switch to Claude without code changes elsewhere. |
+| AI | **DeepSeek Flash** (the latest version) through SiliconFlow's OpenAI-compatible API (the `openai` SDK with a custom `baseURL`), behind an `AiProvider` interface | Claude and OpenAI don't serve mainland China or Hong Kong. Behind the interface, a global deployment can switch to Claude without code changes elsewhere. |
 | Logging | **pino** (JSON logs) → `docker logs` for the MVP | Cheap; can ship to Alibaba Cloud's log service (SLS) later |
 | Testing | **Vitest** + **Testcontainers** (real Postgres) | Rules engine tested against the shared test cases; ledger tested against a real database |
 | Packaging | Docker image, deployed with Docker Compose (Caddy + api + worker + postgres) | Same image runs in HK now and in a mainland region later |
-
-> **Not switched yet:** the code still calls Qwen through Alibaba Cloud Model Studio (`src/ai/qwen.ts`, `AI_PROVIDER=qwen` and the `QWEN_*` variables in §11). Moving to DeepSeek Flash means adding a DeepSeek provider in `src/ai/` and its variables in `src/config.ts`; nothing else depends on the provider.
 
 ## 3. Prerequisites
 
@@ -44,14 +42,15 @@ What the backend does **not** do in the MVP: send push notifications, real-time 
 |---|---|---|
 | Node.js | ≥ 22.12 | `engines` in `package.json`. On < 22.19, `openai` stays pinned to v6 and `testcontainers` to v11 (their newer versions pull in undici 8, which needs 22.19). |
 | Docker | any recent | Local Postgres, integration tests (Testcontainers), building the image |
-| `../Twenty` checked out next to the repo | — | The rules tests read `../Twenty/contracts/rules/fixtures.json` |
+| The `vendor/Twenty` submodule | — | The rules tests and the build read `vendor/Twenty/contracts/rules/fixtures.json` |
 
 ## 4. Local setup
 
 ```sh
+git submodule update --init
 npm ci
 cp .env.example .env     # set JWT_SECRET (≥ 32 chars) and APPLE_CLIENT_IDS
-                         # AI_PROVIDER=fake runs without a Qwen key or network
+                         # AI_PROVIDER=fake runs without an AI key or network
 docker run -d --name twenty-pg -p 5432:5432 \
   -e POSTGRES_USER=twenty -e POSTGRES_PASSWORD=twenty postgres:17-alpine
 npm run migrate:dev      # applies src/db/migrations
@@ -68,7 +67,7 @@ src/rules/     pure rules: grid, snap, start, finish, extend + cascade, overlap,
 src/services/  business operations; own transactions and locking
 src/routes/    Hono routes + Zod schemas (the OpenAPI source)
 src/auth/      Apple ID token verification, email + password (scrypt), JWT access tokens, refresh rotation
-src/ai/        AiProvider interface, qwen.ts, fake.ts, prompt + output validation
+src/ai/        AiProvider interface, SiliconFlow and fake providers, prompt + output validation
 src/jobs/      pg-boss queue names, options and handlers
 src/db/        Drizzle schema, plain-SQL migrations, UUIDv7
 src/lib/       errors, logger, clock, pagination
@@ -85,7 +84,7 @@ What goes where:
 
 ## 6. Data model
 
-A summary of `src/db/schema.ts`, which is the source of truth. `?` marks a nullable column. Every timestamp is a `timestamptz`, and every `id` is a UUIDv7.
+Defined in `src/db/schema.ts`. `?` marks a nullable column. Every timestamp is a `timestamptz`, and every `id` is a UUIDv7.
 
 ```
 users             id, apple_sub? (UNIQUE), email? (lower-cased, trimmed, UNIQUE), password_hash?,
@@ -103,7 +102,7 @@ ai_breakdowns     id, goal_id, user_id, status(queued|running|done|failed), mode
 events            id, user_id, title, notes?, goal_id?, breakdown_item_id?,
                   kind(cadenza|tutti, default cadenza),
                   planned_start (on grid), duration_bars (≥ 1),
-                  status(planned|in_progress|done|missed|cancelled),           ← Tuttis: planned or cancelled
+                  status(planned|in_progress|done|missed),                     ← Tuttis: planned only
                   version (optimistic locking), created_at, updated_at
 event_records     event_id (PK), start_tapped_at?, finish_tapped_at?,          ← Cadenzas only; raw device times
                   recorded_start?, recorded_end?, late_bars, early_bars,       ← computed by the server
@@ -130,7 +129,6 @@ idempotency_keys  user_id, key, method, path, request_hash, status_code?, respon
 - The database enforces the grid itself: `planned_start` must be a multiple of 20 minutes, and `duration_bars` ≥ 1.
 - In `cue_occurrences`, `cancelled` means that one occurrence was deleted. Editing one occurrence's content creates a standalone cue, linked by `detached_cue_id`.
 - **Account deletion** keeps a stripped `users` row (no Apple ID, email, password or name), because the ledger references it.
-- **Behind the rules:** `cancelled` in `events.status` predates the rule that deleting an event removes it ([rules](rules.md)). Until the backend catches up, the schema keeps it, and `DELETE /v1/events/{id}` still cancels instead of deleting. It also doesn't reject Cadenzas planned in the past yet (`start_in_past`).
 
 ## 7. API
 
@@ -187,7 +185,7 @@ Deliberately absent for the MVP: a general sync endpoint, WebSockets, and an adm
 
 ### Change a rule
 1. Rules are product decisions: confirm against [rules.md](rules.md), or ask. Don't invent timing or token behaviour.
-2. The fixtures change first (in `../Twenty`, by whoever owns the rules). Then update `src/rules`, run `npm run test:rules`, and let the iOS developers know the Swift port must follow.
+2. The fixtures change first (in the Twenty repo, by whoever owns the rules). Then bump the `vendor/Twenty` submodule, update `src/rules`, run `npm run test:rules`, and let the iOS developers know the Swift port must follow.
 
 ### Change reward values
 Insert a new `reward_rules` row with the next version. Never update an existing row: ledger entries record the version they were paid under.
@@ -236,14 +234,14 @@ All config is environment variables, validated at boot by `src/config.ts` (the p
 | `ACCESS_TOKEN_TTL_SECONDS`, `REFRESH_TOKEN_TTL_DAYS` | 900, 60 | |
 | `APPLE_CLIENT_IDS` | — (required) | Comma-separated: iOS bundle ID, later the web Services ID |
 | `TAP_MAX_AGE_HOURS`, `TAP_MAX_FUTURE_SKEW_SECONDS` | 24, 120 | How old a queued tap may be, and how far its device time may run ahead of the server's clock |
-| `AI_PROVIDER` | qwen | `fake` for local dev and tests |
-| `QWEN_API_KEY`, `QWEN_BASE_URL`, `QWEN_MODEL`, `AI_TIMEOUT_MS` | —, intl endpoint, qwen-plus, 60000 | Key required when `AI_PROVIDER=qwen` |
+| `AI_PROVIDER` | siliconflow | `fake` for local dev and tests |
+| `SILICONFLOW_API_KEY`, `SILICONFLOW_BASE_URL`, `SILICONFLOW_MODEL`, `AI_TIMEOUT_MS` | —, `https://api.siliconflow.com/v1`, —, 60000 | Key and model required when `AI_PROVIDER=siliconflow`. The model is SiliconFlow's ID for the latest DeepSeek Flash |
 | `AI_DAILY_BREAKDOWN_LIMIT` | 5 | Per user per local day |
 | `OSS_REGION`, `OSS_BUCKET`, `OSS_ACCESS_KEY_ID`, `OSS_ACCESS_KEY_SECRET`, `OSS_BACKUP_PREFIX` | —, …, `backups/` | `db.backup` is scheduled only when `OSS_BUCKET` is set |
 | `BACKUP_CRON` | `30 19 * * *` | UTC; 03:30 Hong Kong time |
 | `DOMAIN`, `POSTGRES_PASSWORD`, `TWENTY_IMAGE`, `POSTGRES_IMAGE`, `CADDY_IMAGE` | | Read by `docker-compose.yml`, not the app |
 
-Never commit `.env`. Secrets (JWT secret, Qwen key, OSS keys) never go to clients.
+Never commit `.env`. Secrets (JWT secret, SiliconFlow key, OSS keys) never go to clients.
 
 ## 12. Deploy and operations
 
@@ -265,10 +263,10 @@ The MVP is a test in China with one user: one server on Alibaba Cloud Hong Kong 
 
 ## 13. CI/CD
 
-The repo has no CI configured yet. This is the recommended pipeline; the steps apply to any CI system.
+The steps apply to any CI system.
 
 **On every pull request** (all must pass before merge):
-1. Check out `Twenty-backend` and `../Twenty` side by side (or set `RULES_FIXTURES_PATH`), so the rules tests find the fixtures.
+1. Check out `Twenty-backend` with its `vendor/Twenty` submodule, so the rules tests and the build find the fixtures.
 2. `npm ci`
 3. `npm run typecheck`
 4. `npm test`. The runner needs Docker for Testcontainers. This includes the rules fixtures and the OpenAPI drift test.
@@ -289,7 +287,7 @@ curl -fsS https://$DOMAIN/healthz
 ```
 Roll back by deploying the previous SHA tag. Migrations only go forward, so a schema change must stay compatible with the previous image until the rollback window has passed. Split risky changes: add a column first, start using it in a later release.
 
-Example GitHub Actions workflow (adapt the registry, secrets and fixtures checkout to your setup):
+Example GitHub Actions workflow (adapt the registry and secrets to your setup):
 
 ```yaml
 # .github/workflows/ci.yml
@@ -302,25 +300,21 @@ jobs:
   test:
     runs-on: ubuntu-latest          # has Docker, which Testcontainers needs
     steps:
-      - uses: actions/checkout@v4
-        with: { path: Twenty-backend }
-      - uses: actions/checkout@v4   # the shared fixtures
-        with: { repository: <owner>/Twenty, path: Twenty, token: ${{ secrets.FIXTURES_TOKEN }} }
+      - uses: actions/checkout@v4   # the token reads the Twenty submodule if it is private
+        with: { submodules: true, token: ${{ secrets.FIXTURES_TOKEN }} }
       - uses: actions/setup-node@v4
-        with: { node-version: 22, cache: npm, cache-dependency-path: Twenty-backend/package-lock.json }
+        with: { node-version: 22, cache: npm }
       - run: npm ci
-        working-directory: Twenty-backend
       - run: npm run typecheck && npm test && npm run build
-        working-directory: Twenty-backend
       - name: Migrations match schema
-        working-directory: Twenty-backend
         run: npm run db:generate && test -z "$(git status --porcelain src/db/migrations)"
   image:
     needs: test
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4   # the image build reads the fixtures too
+        with: { submodules: true, token: ${{ secrets.FIXTURES_TOKEN }} }
       - uses: docker/login-action@v3
         with:
           registry: registry.cn-hongkong.aliyuncs.com
@@ -332,8 +326,6 @@ jobs:
           tags: registry.cn-hongkong.aliyuncs.com/<namespace>/twenty-backend:${{ github.sha }}
 ```
 
-`../Twenty` is not a git repository yet. Until it is, CI can't check it out: either make it a repo, or vendor a copy of `fixtures.json` into CI and point `RULES_FIXTURES_PATH` at it.
-
 ## 14. Decisions the backend made
 
 Where the product rules were silent, the backend made eleven calls of its own: late offline taps, the close_stale backstop, account deletion, unsupported time zones, the day-end anchor, cue details, size caps, abandoned events, the AI limit's day, refresh-token reuse, and the default event kind. They are listed in the [backend README](../../../Twenty-backend/README.md#decisions-the-rules-left-open). If you change one, update that list.
@@ -344,7 +336,7 @@ Where the product rules were silent, the backend made eleven calls of its own: l
 |---|---|
 | `createZstdDecompress.bind` / undici error at startup or in tests | Node < 22.19 with an unpinned `openai` or `testcontainers`. Keep them at `openai@6` and `testcontainers@11`, or upgrade Node. |
 | Integration tests hang or fail to start Postgres | Docker isn't running. |
-| `contracts/rules/fixtures.json not found` | Put `../Twenty` next to the repo, or set `RULES_FIXTURES_PATH`. |
+| `vendor/Twenty/contracts/rules/fixtures.json not found` | Run `git submodule update --init`, or set `RULES_FIXTURES_PATH` to another copy. |
 | 401s in a test after advancing the clock | Access tokens last 15 minutes of *fake* time. Use the harness's per-request tokens. |
 | `tsx: command not found` | `node_modules` is missing (for example after removing a git worktree). Run `npm ci`. |
 | `Invalid configuration: …` at boot | A required env var is missing or invalid; the message names it. |
