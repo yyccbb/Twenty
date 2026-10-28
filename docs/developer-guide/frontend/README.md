@@ -70,6 +70,7 @@ Branch on `code`, never on `message` (messages are for logs and may change). Cod
 | `not_cadenza` | 409 | Start, extend or finish was sent for a Tutti. Client bug: only show those actions on Cadenzas. |
 | `version_conflict` | 409 | Someone else changed this item. Refetch it, then reapply or ask the user. |
 | `bar_misaligned`, `invalid_duration`, `invalid_bars` | 422 | The client sent an off-grid start or a non-whole-bar length. That's a client bug: snap before sending. |
+| `start_in_past` | 422 | A Cadenza was created, moved or switched to with a start before now. Offer the next grid mark instead. |
 | `too_early` | 422 | Start tapped more than 2 bars before the planned start. |
 | `tap_too_old`, `tap_in_future` | 422 | Offline tap older than 24 h, or the device clock is ahead by more than 2 min. Tell the user; drop the queued tap. |
 | `window_closed` | 409 | Finish tapped, or extend sent, after planned end + 5 min. The UI shouldn't allow it: check the device clock and drop the queued action. |
@@ -123,7 +124,8 @@ The grid math in brief: bar = 20 min, grid marks at :00/:20/:40, every tap snaps
 ## 9. Calendar and cues
 
 - Every event has a `kind`: `cadenza` or `tutti`. Both sit on the grid and last whole bars. Show the start/finish controls and token previews on Cadenzas only.
-- A planned event can switch kind with `PATCH`. Switching to Cadenza can fail with `cadenza_overlap`.
+- A Cadenza can't start in the past: the earliest start is the next grid mark at or after now (`422 start_in_past`). Tuttis can be planned at any time.
+- A planned event can switch kind with `PATCH`. Switching to Cadenza can fail with `cadenza_overlap`, or with `start_in_past` if its start has passed.
 - `DELETE /v1/events/{id}` removes the event. There is no cancelled state: a deleted event is gone. Only planned events can be deleted. A Cadenza that has started, finished or been missed can't be deleted (`409 invalid_state`), because its record, and any tokens it earned, must stay.
 - `GET /v1/calendar?from=&to=` returns events plus **expanded** cue occurrences for the range (at most 62 days). Use it to draw the calendar and to schedule notifications. `GET /v1/events` lists events only (at most 92 days).
 - Cues can be at any minute, have no duration and never earn tokens. Repeats use RFC 5545 `RRULE`, which the server expands.

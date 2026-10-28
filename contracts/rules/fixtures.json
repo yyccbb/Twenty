@@ -24,6 +24,7 @@
     "Conflict and warning ID lists are sorted. Expected objects must match exactly (no extra keys).",
     "Events with status missed are ignored by overlap checks and cascades. There is no cancelled status: deleted events are gone.",
     "In create cases, event_id (when present) names an existing event being edited; it is left out of its own overlap check.",
+    "In create cases, now (when present) is the server's clock. A Cadenza whose start is set before now is rejected with start_in_past; edits that keep the start, and Tuttis, are not checked. Cases without now skip this check.",
     "Calendar entries without a status are planned. A start fails with cadenza_in_progress while another Cadenza is in_progress."
   ],
   "groups": {
@@ -1844,6 +1845,134 @@
           "kind": "tutti",
           "start": "2026-11-02T13:40:00+08:00",
           "end": "2026-11-02T14:20:00+08:00"
+        },
+        "expected": {
+          "ok": true
+        }
+      },
+      {
+        "id": "create-12",
+        "desc": "A Cadenza starting before now is rejected",
+        "input": {
+          "calendar": [],
+          "kind": "cadenza",
+          "start": "2026-11-02T14:00:00+08:00",
+          "end": "2026-11-02T14:40:00+08:00",
+          "now": "2026-11-02T14:03:00+08:00"
+        },
+        "expected": {
+          "ok": false,
+          "error": "start_in_past"
+        }
+      },
+      {
+        "id": "create-13",
+        "desc": "A Cadenza may start exactly now",
+        "input": {
+          "calendar": [],
+          "kind": "cadenza",
+          "start": "2026-11-02T14:00:00+08:00",
+          "end": "2026-11-02T14:40:00+08:00",
+          "now": "2026-11-02T14:00:00+08:00"
+        },
+        "expected": {
+          "ok": true
+        }
+      },
+      {
+        "id": "create-14",
+        "desc": "After a mark has passed, the next mark is the earliest start",
+        "input": {
+          "calendar": [],
+          "kind": "cadenza",
+          "start": "2026-11-02T14:20:00+08:00",
+          "end": "2026-11-02T14:40:00+08:00",
+          "now": "2026-11-02T14:03:00+08:00"
+        },
+        "expected": {
+          "ok": true
+        }
+      },
+      {
+        "id": "create-15",
+        "desc": "Tuttis may be planned in the past",
+        "input": {
+          "calendar": [],
+          "kind": "tutti",
+          "start": "2026-11-02T13:00:00+08:00",
+          "end": "2026-11-02T14:00:00+08:00",
+          "now": "2026-11-02T14:03:00+08:00"
+        },
+        "expected": {
+          "ok": true
+        }
+      },
+      {
+        "id": "create-16",
+        "desc": "Moving a Cadenza to a start before now is rejected",
+        "input": {
+          "calendar": [
+            {
+              "id": "X",
+              "kind": "cadenza",
+              "start": "2026-11-02T15:00:00+08:00",
+              "end": "2026-11-02T15:40:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "event_id": "X",
+          "kind": "cadenza",
+          "start": "2026-11-02T14:00:00+08:00",
+          "end": "2026-11-02T14:40:00+08:00",
+          "now": "2026-11-02T14:03:00+08:00"
+        },
+        "expected": {
+          "ok": false,
+          "error": "start_in_past"
+        }
+      },
+      {
+        "id": "create-17",
+        "desc": "Switching a past Tutti to a Cadenza is rejected",
+        "input": {
+          "calendar": [
+            {
+              "id": "T",
+              "kind": "tutti",
+              "start": "2026-11-02T13:00:00+08:00",
+              "end": "2026-11-02T13:40:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "event_id": "T",
+          "kind": "cadenza",
+          "start": "2026-11-02T13:00:00+08:00",
+          "end": "2026-11-02T13:40:00+08:00",
+          "now": "2026-11-02T14:03:00+08:00"
+        },
+        "expected": {
+          "ok": false,
+          "error": "start_in_past"
+        }
+      },
+      {
+        "id": "create-18",
+        "desc": "Editing a Cadenza without moving its start is not checked",
+        "input": {
+          "calendar": [
+            {
+              "id": "X",
+              "kind": "cadenza",
+              "start": "2026-11-02T14:00:00+08:00",
+              "end": "2026-11-02T14:40:00+08:00",
+              "status": "planned"
+            }
+          ],
+          "event_id": "X",
+          "kind": "cadenza",
+          "start": "2026-11-02T14:00:00+08:00",
+          "end": "2026-11-02T15:00:00+08:00",
+          "now": "2026-11-02T14:10:00+08:00"
         },
         "expected": {
           "ok": true

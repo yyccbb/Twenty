@@ -130,7 +130,7 @@ idempotency_keys  user_id, key, method, path, request_hash, status_code?, respon
 - The database enforces the grid itself: `planned_start` must be a multiple of 20 minutes, and `duration_bars` ≥ 1.
 - In `cue_occurrences`, `cancelled` means that one occurrence was deleted. Editing one occurrence's content creates a standalone cue, linked by `detached_cue_id`.
 - **Account deletion** keeps a stripped `users` row (no Apple ID, email, password or name), because the ledger references it.
-- **Behind the rules:** `cancelled` in `events.status` predates the rule that deleting an event removes it ([rules](rules.md)). Until the backend catches up, the schema keeps it, and `DELETE /v1/events/{id}` still cancels instead of deleting.
+- **Behind the rules:** `cancelled` in `events.status` predates the rule that deleting an event removes it ([rules](rules.md)). Until the backend catches up, the schema keeps it, and `DELETE /v1/events/{id}` still cancels instead of deleting. It also doesn't reject Cadenzas planned in the past yet (`start_in_past`).
 
 ## 7. API
 
@@ -148,8 +148,8 @@ REST + JSON over HTTPS, versioned under `/v1`, described by the generated OpenAP
 | | `DELETE /v1/me` | Account deletion (**required by App Store rules** for apps with sign-in) |
 | **Calendar** | `GET /v1/events?from=&to=` | Events in a date range (cursor-paginated) |
 | | `GET /v1/events/{id}` | One event with its start/finish record |
-| | `POST /v1/events` | Create a Cadenza or Tutti (`kind`); rejects off-grid start, non-integer bars, or a Cadenza overlapping another (`409 cadenza_overlap`) |
-| | `PATCH /v1/events/{id}` | Reschedule / edit / switch `kind` (uses `version` for conflict detection) |
+| | `POST /v1/events` | Create a Cadenza or Tutti (`kind`); rejects off-grid start, non-integer bars, a Cadenza starting before now (`422 start_in_past`), or a Cadenza overlapping another (`409 cadenza_overlap`) |
+| | `PATCH /v1/events/{id}` | Reschedule / edit / switch `kind` (uses `version` for conflict detection). Moving a Cadenza, or switching to one, to a start before now returns `422 start_in_past` |
 | | `DELETE /v1/events/{id}` | Delete. The event and its change history are removed; there is no cancelled state. Only planned events can be deleted; a Cadenza that has started, finished or been missed gets `409 invalid_state`, since its record, and any tokens it earned, must stay |
 | | `GET /v1/calendar?from=&to=` | Events + **expanded** cue occurrences in one call (also what iOS uses to schedule notifications) |
 | **Recording** (Cadenzas only; a Tutti gets `409 not_cadenza`) | `POST /v1/events/{id}/start` | Body `{tapped_at}` → `recorded_start`, early/late bars; `409 cadenza_overlap` if an early start would overlap another Cadenza; `409 cadenza_in_progress` if another Cadenza hasn't finished yet |

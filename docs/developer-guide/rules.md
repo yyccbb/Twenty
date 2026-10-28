@@ -23,6 +23,7 @@ The rules in §2–§5 and §7 apply to Cadenzas only.
 
 - One **bar** is 20 minutes. Grid marks are :00, :20 and :40.
 - Events of both kinds: the start must sit on a grid mark, and `duration_bars` is a whole number ≥ 1.
+- **No Cadenzas in the past.** A Cadenza's planned start can't be earlier than now, by the server's clock when the request arrives. At 14:03 the earliest a new Cadenza can start is 14:20; tapping start right away then counts as 1 bar early (§3). The check runs whenever a Cadenza's start is set: on create, on an edit that moves it, and when a Tutti switches to Cadenza. An edit that leaves the start alone isn't checked. Violations return `422 start_in_past`. Tuttis can be planned at any time, past included.
 - **Supported for now: time zones that are a whole number of hours from UTC** (including their daylight-saving shifts). For these, the local :00 / :20 / :40 marks are also UTC :00 / :20 / :40 marks, so **all grid math runs in UTC**. China (UTC+8), most of Europe, the Americas, Japan, Korea and most of Southeast Asia qualify.
 - All times are stored as UTC `timestamptz`. The user's IANA time zone (e.g. `Asia/Shanghai`) is kept for display, day boundaries and the day-end setting (§5).
 
@@ -138,7 +139,7 @@ On the device, the frontend also marks the Cadenza auto-finished locally at `E +
 
 The rule is checked on create, on edit (including switching an event's kind) and on early start. Separately, only one Cadenza can be in progress at a time (§3). Missed Cadenzas are ignored. Violations return `409 cadenza_overlap` with the conflicting Cadenza IDs (sorted) so the app can ask the user to shift things. Extensions can't break the rule, because the cascade moves every Cadenza in the way (§5).
 
-**Switching kinds:** a planned event can switch between Tutti and Cadenza with `PATCH`. Switching to Cadenza runs the overlap check. A Cadenza that has started, finished or been missed can't switch (`409 invalid_state`).
+**Switching kinds:** a planned event can switch between Tutti and Cadenza with `PATCH`. Switching to Cadenza runs the overlap check and the past check (§1). A Cadenza that has started, finished or been missed can't switch (`409 invalid_state`).
 
 ## 7. Tokens
 
