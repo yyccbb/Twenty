@@ -38,11 +38,12 @@ The app schedules every notification itself. Each needs to be rescheduled when t
 | Planning prompt (e.g. nightly "plan tomorrow") | `settings.planning_prompts` (ISO weekday + `local_time`) | Settings change |
 | Start prompt | Cadenza `planned_start` | Cadenza created, moved, deleted or switched kind; a cascade moves it (`moved` in the extend response). **Back-to-back:** while the previous Cadenza (ending at this one's start) is in progress, don't schedule this prompt, because that Cadenza's prompt becomes "Finish A and start B". If the previous one is finished before its end, schedule this prompt again at `planned_start` |
 | "Finish or extend?" prompt | Cadenza `planned_end` − 5 min | Scheduled on start (an early or late start doesn't move it, because the planned end is fixed); moved on extend; removed on finish. If the next Cadenza starts at this one's end, the prompt switches to "Finish A and start B" at `planned_end` |
+| Tutti start notification | Tutti `planned_start` | Tutti created, moved, deleted or switched kind |
 | Cue occurrence | `/v1/calendar` occurrences (`at`) | Cue or occurrence changes |
 
-Tuttis get no start or finish prompts.
+A Tutti's start notification is a plain reminder with no start action, because Tuttis aren't recorded. Tuttis get no finish prompt.
 
-iOS allows at most **64 pending local notifications** per app, and its built-in repeating triggers can't express cue rules like "every 2nd Tuesday". So schedule each occurrence from `/v1/calendar`, which returns cue repeats already expanded, in a rolling window: the next ~48 hours of Cadenza prompts, cues and planning prompts, capped below 64. Top it up on launch and on background refresh, with jitter.
+iOS allows at most **64 pending local notifications** per app, and its built-in repeating triggers can't express cue rules like "every 2nd Tuesday". So schedule each occurrence from `/v1/calendar`, which returns cue repeats already expanded, in a rolling window: the next ~48 hours of Cadenza prompts, Tutti start notifications, cues and planning prompts, capped below 64. Top it up on launch and on background refresh, with jitter.
 
 Example, a late start. A Cadenza is planned 14:00–15:00 and the user taps start at 14:07:12:
 
